@@ -404,7 +404,7 @@ def analytics():
     hourly_raw = db.session.query(
         extract('hour', StockOutLog.date).label('hour'),
         func.sum(StockOutLog.qty).label('units')
-    ).group_by('hour').all()
+    ).group_by(extract('hour', StockOutLog.date)).all()
     hourly = {int(r.hour): int(r.units) for r in hourly_raw}
     hourly_labels = [f"{h:02d}:00" for h in range(24)]
     hourly_values = [hourly.get(h, 0) for h in range(24)]
