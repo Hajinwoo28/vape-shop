@@ -1452,17 +1452,6 @@ TEMPLATES["products.html"] = """
                     
                     <div class="field" id="qty_group"><label>Initial Qty</label><input type="number" name="quantity" id="quantity" value="0"></div>
                     
-                    <div class="field">
-                        <label>Barcode ID</label>
-                        <div style="display: flex; gap: 4px;">
-                            <input type="text" id="barcode_display" placeholder="Scan Barcode" readonly style="background: #e2e8f0;">
-                            <button type="button" onclick="scanProductBarcode()" class="btn" style="background: var(--brand); color: white; height: 38px; padding: 0 10px; border-radius: var(--radius-sm); font-size: 0.8rem;">
-                                <i class="fas fa-camera"></i>
-                            </button>
-                        </div>
-                    </div>
-                    
-                    <div class="field"><label>Cost Price ₱</label><input type="number" step="0.01" name="cost" id="cost" required></div>
                     <div class="field"><label>Selling Price ₱</label><input type="number" step="0.01" name="price" id="price" required></div>
                 </div>
 
@@ -1530,24 +1519,15 @@ function previewImg(input) {
     r.readAsDataURL(input.files[0]);
 }
 
-function scanProductBarcode() {
-    startFSScanner((decodedText) => {
-        document.getElementById('barcode_display').value = decodedText;
-        document.getElementById('barcode').value = decodedText;
-    });
-}
-
 function editProduct(key) {
     const p = productsData[key];
     document.getElementById('editing_key').value = key;
     document.getElementById('barcode').value = p.barcode || '';
-    document.getElementById('barcode_display').value = p.barcode || 'Generated';
     document.getElementById('name').value = p.name;
     document.getElementById('flavor').value = p.flavor || '';
     document.getElementById('type').value = p.type;
     document.getElementById('version').value = p.version || '';
     document.getElementById('mg').value = p.mg || '';
-    document.getElementById('cost').value = p.cost;
     document.getElementById('price').value = p.price;
     document.getElementById('qty_group').style.display = 'none';
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1557,7 +1537,6 @@ function resetForm() {
     document.getElementById('productForm').reset();
     document.getElementById('editing_key').value = '';
     document.getElementById('barcode').value = '';
-    document.getElementById('barcode_display').value = '';
     document.getElementById('qty_group').style.display = '';
     document.getElementById('imgPreview').style.display = 'none';
     document.getElementById('uploadHint').style.display = 'flex';
@@ -2303,12 +2282,7 @@ TEMPLATES["sales.html"] = """
                 <!-- Search Field -->
                 <div class="field search-wrap">
                     <label>Search Product Name</label>
-                    <div style="display: flex; gap: 8px; align-items: center;">
-                        <input type="text" id="productSearch" placeholder="Type product name or flavor..." oninput="filterProducts()" style="flex: 1;">
-                        <button type="button" onclick="triggerBarcodeScanner()" class="btn" style="background: var(--brand); color: white; width: 46px; height: 46px; padding: 0; display: flex; align-items: center; justify-content: center; border-radius: var(--radius-sm);">
-                            <i class="fas fa-camera"></i>
-                        </button>
-                    </div>
+                    <input type="text" id="productSearch" placeholder="Type product name or flavor..." oninput="filterProducts()">
                     <input type="hidden" name="product_key" id="hiddenKey" required>
                     <div id="searchResults" class="search-results"></div>
                 </div>
@@ -2409,19 +2383,6 @@ function filterProducts() {
         </div>
     `).join('');
     div.style.display = matches.length ? 'block' : 'none';
-}
-
-function triggerBarcodeScanner() {
-    startFSScanner((decodedText) => {
-        const match = Object.entries(productsData).find(([id, p]) => p.barcode === decodedText);
-        if (match) {
-            const [id, p] = match;
-            selectItem(id, `${p.name} - ${p.flavor}`, p.price, p.qty);
-            showToast(`Product linked: ${p.name}`);
-        } else {
-            showToast(`Barcode ID ${decodedText} not detected in inventory.`, '#ef4444');
-        }
-    });
 }
 
 function calcTotal() {
