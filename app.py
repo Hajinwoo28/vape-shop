@@ -257,9 +257,12 @@ def sales():
     if request.method == 'POST':
         p_id = request.form.get('product_key')
         qty = int(request.form.get('quantity') or 0)
+        manual_discount = float(request.form.get('manual_discount') or 0)
         p = db.session.get(Product, p_id)
         if p and qty > 0 and p.qty >= qty:
-            discounted_price = p.price * (1 - (p.discount or 0) / 100)
+            product_discount = p.discount or 0
+            total_discount = min(product_discount + manual_discount, 100)
+            discounted_price = p.price * (1 - total_discount / 100)
             p.qty -= qty
             db.session.add(StockOutLog(name=p.name, flavor=p.flavor, category=p.type, qty=qty, price=discounted_price, cost=p.cost))
             db.session.commit()
@@ -2323,11 +2326,15 @@ TEMPLATES["sales.html"] = """
                     <div id="searchResults" class="search-results"></div>
                 </div>
 
-                <!-- Qty and Total Row -->
+                <!-- Qty, Discount, and Total Row -->
                 <div class="fields-row">
                     <div class="field">
                         <label>Quantity</label>
                         <input type="number" name="quantity" id="qtyInput" value="" min="1" oninput="calcTotal()">
+                    </div>
+                    <div class="field">
+                        <label>Discount % <span style="font-size:0.72rem;color:var(--muted);font-weight:400;">(additional)</span></label>
+                        <input type="number" name="manual_discount" id="manualDiscount" value="0" min="0" max="100" step="0.01" oninput="calcTotal()" style="border: 1.5px solid #f59e0b; background: #fffbeb;">
                     </div>
                     <div class="field">
                         <label>Total Price</label>
@@ -2387,18 +2394,22 @@ function showToast(msg, color = '#10b981') {
 }
 
 function selectItem(id, label, price, stock, discount) {
-    const finalPrice = price * (1 - (discount || 0) / 100);
+    const productDiscount = discount || 0;
+    const finalPrice = price * (1 - productDiscount / 100);
     document.getElementById('hiddenKey').value = id;
     document.getElementById('productSearch').value = label;
     document.getElementById('searchResults').style.display = 'none';
 
-    const discountNote = discount > 0 ? ` — ${discount}% OFF → ₱${finalPrice.toLocaleString(undefined,{minimumFractionDigits:2})}` : '';
+    const discountNote = productDiscount > 0 ? ` — ${productDiscount}% OFF → ₱${finalPrice.toLocaleString(undefined,{minimumFractionDigits:2})}` : '';
     document.getElementById('badgeText').textContent = `${label} (In Stock: ${stock})${discountNote}`;
     document.getElementById('selectedBadge').classList.add('show');
 
-    document.getElementById('qtyInput').dataset.price = finalPrice;
+    // Store original price and product-level discount for calcTotal
+    document.getElementById('qtyInput').dataset.basePrice = price;
+    document.getElementById('qtyInput').dataset.productDiscount = productDiscount;
     document.getElementById('qtyInput').max = stock;
     document.getElementById('qtyInput').value = 1;
+    document.getElementById('manualDiscount').value = 0;
     document.getElementById('saleBtn').disabled = false;
     calcTotal();
 }
@@ -2425,15 +2436,27 @@ function filterProducts() {
 
 function calcTotal() {
     const qty = parseInt(document.getElementById('qtyInput').value) || 0;
-    const price = parseFloat(document.getElementById('qtyInput').dataset.price) || 0;
-    document.getElementById('totalBox').textContent = `₱ ${(qty * price).toLocaleString(undefined,{minimumFractionDigits:2})}`;
+    const basePrice = parseFloat(document.getElementById('qtyInput').dataset.basePrice) || 0;
+    const productDiscount = parseFloat(document.getElementById('qtyInput').dataset.productDiscount) || 0;
+    const manualDiscount = parseFloat(document.getElementById('manualDiscount').value) || 0;
+    const totalDiscount = Math.min(productDiscount + manualDiscount, 100);
+    const finalPrice = basePrice * (1 - totalDiscount / 100);
+
+    let label = `₱ ${(qty * finalPrice).toLocaleString(undefined,{minimumFractionDigits:2})}`;
+    if (totalDiscount > 0) {
+        label += ` <span style="font-size:0.75rem;color:#f59e0b;font-weight:700;">(${totalDiscount.toFixed(1)}% OFF)</span>`;
+    }
+    document.getElementById('totalBox').innerHTML = label;
 }
 
 function clearSale() {
     document.getElementById('hiddenKey').value = '';
     document.getElementById('productSearch').value = '';
     document.getElementById('qtyInput').value = 1;
-    document.getElementById('totalBox').textContent = '₱ 0.00';
+    document.getElementById('qtyInput').dataset.basePrice = 0;
+    document.getElementById('qtyInput').dataset.productDiscount = 0;
+    document.getElementById('manualDiscount').value = 0;
+    document.getElementById('totalBox').innerHTML = '₱ 0.00';
     document.getElementById('selectedBadge').classList.remove('show');
     document.getElementById('saleBtn').disabled = true;
 }
