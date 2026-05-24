@@ -1261,7 +1261,7 @@ TEMPLATES["login.html"] = """
             outline: none; transition: 0.2s; background: rgba(255,255,255,0.06); color: #f1f5f9;
         }
 
-        .form-group input:focus { border-color: var(--brand-purple); background: white; box-shadow: 0 0 0 4px rgba(112, 81, 148, 0.1); }
+        .form-group input:focus { border-color: var(--brand-purple); background: rgba(255,255,255,0.1); color: #f1f5f9; box-shadow: 0 0 0 4px rgba(112, 81, 148, 0.15); }
         .form-group input:focus + i { color: var(--brand-purple); }
 
         .btn-login {
