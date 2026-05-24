@@ -2,6 +2,7 @@ import os
 import uuid
 import time
 from datetime import datetime, timedelta
+from dotenv import load_dotenv
 from jinja2 import DictLoader
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session
 from flask_sqlalchemy import SQLAlchemy
@@ -9,22 +10,29 @@ from sqlalchemy import func, extract, desc
 from flask_migrate import Migrate
 from werkzeug.utils import secure_filename
 
+load_dotenv()
+
 # --- 1. INITIALIZE APP & JINJA DICT TEMPLATES ---
 app = Flask(__name__)
 app.secret_key = "flex_vape_final_unified_key"
 
-# --- SQLITE CONFIGURATION ---
-basedir = os.path.abspath(os.path.dirname(__file__))
+# --- NEON POSTGRESQL CONFIGURATION ---
+DATABASE_URL = os.environ.get('DATABASE_URL', '')
 
-# On Vercel (and other serverless platforms), only /tmp is writable
-IS_SERVERLESS = os.environ.get('VERCEL') or not os.access(basedir, os.W_OK)
-DB_PATH = '/tmp/flex_vape.db' if IS_SERVERLESS else os.path.join(basedir, 'flex_vape.db')
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + DB_PATH
+# Fix for SQLAlchemy: Neon may return 'postgres://' -- normalize to 'postgresql://'
+if DATABASE_URL.startswith('postgres://'):
+    DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
+
+app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+    'pool_pre_ping': True,
+    'pool_recycle': 280,
+}
 
 db = SQLAlchemy(app)
 
-UPLOAD_FOLDER = '/tmp/uploads' if IS_SERVERLESS else os.path.join(basedir, 'static', 'uploads')
+UPLOAD_FOLDER = '/tmp/uploads'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
