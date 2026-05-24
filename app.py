@@ -310,7 +310,7 @@ TEMPLATES["base.html"] = """
     <link rel="icon" type="image/jpeg" href="/static/images/flex_vape_shop.jpg">
     
     <!-- Professional Font & Icons -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     
     <!-- Barcode Scanner Library -->
@@ -1181,7 +1181,7 @@ TEMPLATES["login.html"] = """
     <title>Flex Vape | Login</title>
     <link rel="icon" type="image/jpeg" href="/static/images/flex_vape_shop.jpg">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
     <style>
         :root {
             --brand-navy: #0f172a;
@@ -1888,7 +1888,7 @@ TEMPLATES["reports.html"] = """
 {% extends "base.html" %}
 
 {% block content %}
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
 <style>
     :root {
