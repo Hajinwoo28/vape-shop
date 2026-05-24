@@ -2457,6 +2457,13 @@ except Exception:
 
 with app.app_context():
     db.create_all()
+    # Safe migration: add 'discount' column to existing product table if missing
+    try:
+        with db.engine.connect() as conn:
+            conn.execute(db.text("ALTER TABLE product ADD COLUMN IF NOT EXISTS discount FLOAT DEFAULT 0.0"))
+            conn.commit()
+    except Exception:
+        pass  # Column already exists or DB doesn't support IF NOT EXISTS — safe to ignore
 
 # --- 9. LOCAL DEV SERVER ---
 if __name__ == '__main__':
