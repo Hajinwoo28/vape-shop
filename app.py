@@ -57,12 +57,13 @@ class StockOutLog(db.Model):
     flavor = db.Column(db.String(100))
     category = db.Column(db.String(50))
     qty = db.Column(db.Integer)
-    price = db.Column(db.Float)
-    cost = db.Column(db.Float)
+    price = db.Column(db.Float, default=0.0)
+    cost = db.Column(db.Float, default=0.0)
 
 # --- 3. LOGIN PROTECTION ---
-ADMIN_USER = "flexinventory"
-ADMIN_PASS = "flexsystem"
+# Set FLEX_USER and FLEX_PASS environment variables in production.
+ADMIN_USER = os.environ.get("FLEX_USER", "flexinventory")
+ADMIN_PASS = os.environ.get("FLEX_PASS", "flexsystem")
 
 @app.before_request
 def require_login():
@@ -109,9 +110,15 @@ def dashboard():
     months_labels, sales_trend, purchase_trend = [], [], []
     for i in range(5, -1, -1):
         target_date = now - timedelta(days=i*30)
-        months_labels.append(target_date.strftime("%b"))
-        s_val = db.session.query(func.sum(StockOutLog.qty)).filter(extract('month', StockOutLog.date) == target_date.month).scalar() or 0
-        p_val = db.session.query(func.sum(StockInLog.qty)).filter(extract('month', StockInLog.date) == target_date.month).scalar() or 0
+        months_labels.append(target_date.strftime("%b '%y"))
+        s_val = db.session.query(func.sum(StockOutLog.qty)).filter(
+            extract('month', StockOutLog.date) == target_date.month,
+            extract('year', StockOutLog.date) == target_date.year
+        ).scalar() or 0
+        p_val = db.session.query(func.sum(StockInLog.qty)).filter(
+            extract('month', StockInLog.date) == target_date.month,
+            extract('year', StockInLog.date) == target_date.year
+        ).scalar() or 0
         sales_trend.append(int(s_val))
         purchase_trend.append(int(p_val))
 
@@ -177,7 +184,7 @@ def products():
         p_id = request.form.get('editing_key')
         
         if action == 'delete' and p_id:
-            p = Product.query.get(p_id)
+            p = db.session.get(Product, p_id)
             if p: 
                 db.session.delete(p)
                 db.session.commit()
@@ -198,7 +205,9 @@ def products():
             image_filename = unique_filename
 
         if p_id:
-            p = Product.query.get(p_id)
+            p = db.session.get(Product, p_id)
+            if not p:
+                return redirect(url_for('products'))
             p.name, p.price, p.barcode = name, price, barcode
             p.flavor = request.form.get('flavor')
             p.type = request.form.get('type')
@@ -231,8 +240,8 @@ def sales():
     if request.method == 'POST':
         p_id = request.form.get('product_key')
         qty = int(request.form.get('quantity') or 0)
-        p = Product.query.get(p_id)
-        if p and p.qty >= qty:
+        p = db.session.get(Product, p_id)
+        if p and qty > 0 and p.qty >= qty:
             p.qty -= qty
             db.session.add(StockOutLog(name=p.name, flavor=p.flavor, category=p.type, qty=qty, price=p.price, cost=p.cost))
             db.session.commit()
@@ -473,6 +482,16 @@ TEMPLATES["base.html"] = """
         /* --- OVERLAY & CONTENT --- */
         .sidebar-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000; backdrop-filter: blur(2px); }
         .main-content { margin-left: var(--sidebar-width); padding: 40px; width: calc(100% - var(--sidebar-width)); flex-grow: 1; }
+        .main-content.no-sidebar { margin-left: 0; width: 100%; }
+
+        /* --- FLASH MESSAGES --- */
+        .flash-container { margin-bottom: 20px; display: flex; flex-direction: column; gap: 10px; }
+        .flash-msg { display: flex; align-items: center; gap: 10px; padding: 12px 18px; border-radius: 12px; font-size: 0.875rem; font-weight: 600; position: relative; }
+        .flash-success { background: #d1fae5; color: #065f46; border: 1px solid #a7f3d0; }
+        .flash-danger  { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+        .flash-warning { background: #fef9c3; color: #854d0e; border: 1px solid #fde68a; }
+        .flash-close { background: none; border: none; cursor: pointer; font-size: 1.1rem; margin-left: auto; opacity: 0.6; line-height: 1; padding: 0 4px; }
+        .flash-close:hover { opacity: 1; }
 
         @media (max-width: 1024px) {
             .mobile-header { display: flex; }
@@ -540,6 +559,19 @@ TEMPLATES["base.html"] = """
     {% endif %}
 
     <main class="main-content {{ 'no-sidebar' if not session.get('logged_in') }}">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        <div class="flash-container">
+            {% for category, message in messages %}
+            <div class="flash-msg flash-{{ category }}">
+                <i class="fas {{ 'fa-check-circle' if category == 'success' else 'fa-circle-exclamation' }}"></i>
+                {{ message }}
+                <button class="flash-close" onclick="this.parentElement.remove()">&times;</button>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% endwith %}
         {% block content %}{% endblock %}
     </main>
 
@@ -1066,7 +1098,7 @@ TEMPLATES["inventory.html"] = """
                     <tr>
                         <td>
                             <div class="img-cell">
-                                <img src="{{ url_for('static', filename='uploads/' + p.image) if p.image else 'https://via.placeholder.com/50' }}" onerror="this.src='https://via.placeholder.com/50'">
+                                <img src="{{ url_for('static', filename='uploads/' + p.image) if p.image else '' }}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" style="width:100%;height:100%;object-fit:cover;"><div style="display:none;width:100%;height:100%;align-items:center;justify-content:center;color:#cbd5e1;font-size:1.2rem;"><i class="fas fa-image"></i></div>
                             </div>
                         </td>
                         <td class="name-cell">
@@ -1256,7 +1288,6 @@ TEMPLATES["login.html"] = """
               </div>
             {% endfor %}
         {% endif %}
-        {% endwith %}
 
         <form method="POST">
             <div class="form-group">
@@ -1278,6 +1309,7 @@ TEMPLATES["login.html"] = """
             <button type="submit" class="btn-login">Secure Sign In</button>
         </form>
     </div>
+    {% endwith %}
 
 </body>
 </html>
@@ -1761,7 +1793,7 @@ TEMPLATES["history.html"] = """
             <p>Archive & Analytics</p>
             <h1>Business History</h1>
         </div>
-        <a href="javascript:history.back()" class="btn-back">
+        <a href="/" class="btn-back">
             <i class="fa-solid fa-arrow-left"></i>
             <span>Back to Dashboard</span>
         </a>
@@ -2418,4 +2450,4 @@ if __name__ == '__main__':
     with app.app_context():
         db.create_all()
 
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=os.environ.get('FLASK_DEBUG', 'false').lower() == 'true')
