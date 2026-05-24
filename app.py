@@ -14,15 +14,24 @@ app = Flask(__name__)
 app.secret_key = "flex_vape_final_unified_key"
 
 # --- SQLITE CONFIGURATION ---
+# On Vercel, only /tmp is writable. Fall back to /tmp when the project dir is read-only.
 basedir = os.path.abspath(os.path.dirname(__file__))
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'flex_vape.db')
+_db_path = os.path.join(basedir, 'flex_vape.db')
+if not os.access(basedir, os.W_OK):
+    _db_path = '/tmp/flex_vape.db'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + _db_path
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
 
 UPLOAD_FOLDER = os.path.join(basedir, 'static', 'uploads')
+if not os.access(basedir, os.W_OK):
+    UPLOAD_FOLDER = '/tmp/uploads'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+try:
+    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+except OSError:
+    pass
 
 # --- JINJA DICTLOADER TEMPLATES MAP ---
 TEMPLATES = {}
@@ -2446,8 +2455,9 @@ app.jinja_loader = DictLoader(TEMPLATES)
 # --- 8. DATABASE AUTO INITIALIZE AND HOST EXECUTION ---
 migrate = Migrate(app, db)
 
-if __name__ == '__main__':
-    with app.app_context():
-        db.create_all()
+# Initialize DB tables at module load time so Vercel serverless picks them up.
+with app.app_context():
+    db.create_all()
 
+if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=os.environ.get('FLASK_DEBUG', 'false').lower() == 'true')
