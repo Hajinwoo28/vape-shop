@@ -51,6 +51,7 @@ class Product(db.Model):
     qty = db.Column(db.Integer, default=0)
     cost = db.Column(db.Float, default=0.0)
     price = db.Column(db.Float, default=0.0)
+    discount = db.Column(db.Float, default=0.0)  # Discount percentage (0-100)
     image = db.Column(db.String(255), default='default.jpg')
     date_added = db.Column(db.DateTime, default=datetime.now)
 
@@ -97,6 +98,7 @@ def get_products_dict():
         "qty": p.qty or 0,
         "cost": p.cost or 0.0,
         "price": p.price or 0.0,
+        "discount": p.discount or 0.0,
         "image": p.image
     } for p in products}
 
@@ -205,6 +207,7 @@ def products():
         name = request.form.get('name')
         price = float(request.form.get('price') or 0)
         cost = float(request.form.get('cost') or 0)
+        discount = float(request.form.get('discount') or 0)
         barcode = request.form.get('barcode', '').strip() or str(int(time.time()))
         
         # Handle Image File Upload safely
@@ -226,6 +229,7 @@ def products():
             p.version = request.form.get('version')
             p.mg = request.form.get('mg')
             p.cost = cost
+            p.discount = discount
             if image_filename:
                 p.image = image_filename
         else:
@@ -234,7 +238,8 @@ def products():
                             qty=qty, 
                             type=request.form.get('type'), 
                             flavor=request.form.get('flavor'), 
-                            cost=cost, 
+                            cost=cost,
+                            discount=discount,
                             version=request.form.get('version'), 
                             mg=request.form.get('mg'),
                             image=image_filename or 'default.jpg')
@@ -254,8 +259,9 @@ def sales():
         qty = int(request.form.get('quantity') or 0)
         p = db.session.get(Product, p_id)
         if p and qty > 0 and p.qty >= qty:
+            discounted_price = p.price * (1 - (p.discount or 0) / 100)
             p.qty -= qty
-            db.session.add(StockOutLog(name=p.name, flavor=p.flavor, category=p.type, qty=qty, price=p.price, cost=p.cost))
+            db.session.add(StockOutLog(name=p.name, flavor=p.flavor, category=p.type, qty=qty, price=discounted_price, cost=p.cost))
             db.session.commit()
             flash("Sale recorded successfully.", "success")
         else:
@@ -1469,6 +1475,7 @@ TEMPLATES["products.html"] = """
                     <div class="field" id="qty_group"><label>Initial Qty</label><input type="number" name="quantity" id="quantity" value="0"></div>
                     
                     <div class="field"><label>Selling Price ₱</label><input type="number" step="0.01" name="price" id="price" required></div>
+                    <div class="field"><label>Discount %</label><input type="number" step="0.01" name="discount" id="discount" min="0" max="100" placeholder="0" value="0"></div>
                 </div>
 
                 <div class="form-footer">
@@ -1495,6 +1502,8 @@ TEMPLATES["products.html"] = """
                         <th>Product Name</th>
                         <th>Stock</th>
                         <th>Price</th>
+                        <th>Discount</th>
+                        <th>Final Price</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -1507,6 +1516,16 @@ TEMPLATES["products.html"] = """
                         </td>
                         <td style="font-weight:bold; color: {{ 'red' if p.qty < 5 else 'green' }}">{{ p.qty }}</td>
                         <td>₱{{ "{:,.2f}".format(p.price) }}</td>
+                        <td>
+                            {% if p.discount and p.discount > 0 %}
+                            <span style="background:#fef9c3;color:#854d0e;padding:2px 8px;border-radius:12px;font-size:0.78rem;font-weight:700;">{{ p.discount|int }}% OFF</span>
+                            {% else %}
+                            <span style="color:var(--muted);font-size:0.8rem;">—</span>
+                            {% endif %}
+                        </td>
+                        <td style="font-weight:800;color:var(--brand);">
+                            ₱{{ "{:,.2f}".format(p.price * (1 - (p.discount or 0) / 100)) }}
+                        </td>
                         <td>
                             <div style="display:flex;gap:5px;">
                                 <button class="act-btn" onclick="editProduct('{{ key }}')" style="color:blue;"><i class="fas fa-edit"></i></button>
@@ -1545,6 +1564,7 @@ function editProduct(key) {
     document.getElementById('version').value = p.version || '';
     document.getElementById('mg').value = p.mg || '';
     document.getElementById('price').value = p.price;
+    document.getElementById('discount').value = p.discount || 0;
     document.getElementById('qty_group').style.display = 'none';
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -2366,15 +2386,17 @@ function showToast(msg, color = '#10b981') {
     setTimeout(() => { t.className = 'toast'; }, 2500);
 }
 
-function selectItem(id, label, price, stock) {
+function selectItem(id, label, price, stock, discount) {
+    const finalPrice = price * (1 - (discount || 0) / 100);
     document.getElementById('hiddenKey').value = id;
     document.getElementById('productSearch').value = label;
     document.getElementById('searchResults').style.display = 'none';
 
-    document.getElementById('badgeText').textContent = `${label} (In Stock: ${stock})`;
+    const discountNote = discount > 0 ? ` — ${discount}% OFF → ₱${finalPrice.toLocaleString(undefined,{minimumFractionDigits:2})}` : '';
+    document.getElementById('badgeText').textContent = `${label} (In Stock: ${stock})${discountNote}`;
     document.getElementById('selectedBadge').classList.add('show');
 
-    document.getElementById('qtyInput').dataset.price = price;
+    document.getElementById('qtyInput').dataset.price = finalPrice;
     document.getElementById('qtyInput').max = stock;
     document.getElementById('qtyInput').value = 1;
     document.getElementById('saleBtn').disabled = false;
@@ -2393,9 +2415,9 @@ function filterProducts() {
     );
 
     div.innerHTML = matches.map(([id, p]) => `
-        <div class="s-item" onclick="selectItem('${id}','${p.name} - ${p.flavor}',${p.price},${p.qty})">
+        <div class="s-item" onclick="selectItem('${id}','${p.name} - ${p.flavor}',${p.price},${p.qty},${p.discount||0})">
             <strong>${p.name} <span style="color:var(--brand)">${p.flavor||''}</span></strong>
-            <small>Stock: ${p.qty} | ₱${p.price.toLocaleString()}</small>
+            <small>Stock: ${p.qty} | ₱${p.price.toLocaleString()}${p.discount > 0 ? ` <span style="color:#f59e0b;font-weight:700;">(-${p.discount}%)</span>` : ''}</small>
         </div>
     `).join('');
     div.style.display = matches.length ? 'block' : 'none';
