@@ -1262,6 +1262,14 @@ TEMPLATES["login.html"] = """
         }
 
         .form-group input:focus { border-color: var(--brand-purple); background: rgba(255,255,255,0.1); color: #f1f5f9; box-shadow: 0 0 0 4px rgba(112, 81, 148, 0.15); }
+        .form-group input:-webkit-autofill,
+        .form-group input:-webkit-autofill:hover,
+        .form-group input:-webkit-autofill:focus {
+            -webkit-box-shadow: 0 0 0px 1000px #1e1b2e inset, 0 0 0 4px rgba(112, 81, 148, 0.15);
+            -webkit-text-fill-color: #f1f5f9;
+            border-color: var(--brand-purple);
+            transition: background-color 5000s ease-in-out 0s;
+        }
         .form-group input:focus + i { color: var(--brand-purple); }
 
         .btn-login {
