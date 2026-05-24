@@ -2335,6 +2335,42 @@ TEMPLATES["sales.html"] = """
                     <div id="searchResults" class="search-results"></div>
                 </div>
 
+                <!-- Chillax Infinite Set Variant Picker -->
+                <div id="chillaxPicker" style="display:none; margin-top:14px;">
+                    <!-- Step 1: Type -->
+                    <div id="chillaxStep1">
+                        <div style="font-size:0.7rem;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin-bottom:8px;">Choose Variant</div>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                            <button type="button" class="chillax-variant-btn" id="btnPodDevice"
+                                onclick="chillaxSelectType('pod_device')"
+                                style="padding:14px 10px;border-radius:12px;border:2px solid var(--border);background:white;cursor:pointer;font-weight:700;font-size:0.88rem;transition:.2s;display:flex;flex-direction:column;align-items:center;gap:4px;">
+                                <span style="font-size:1.3rem;">📦</span>
+                                <span>Pod &amp; Device</span>
+                                <span style="color:var(--brand);font-size:1rem;font-weight:900;">₱600</span>
+                            </button>
+                            <button type="button" class="chillax-variant-btn" id="btnPod"
+                                onclick="chillaxSelectType('pod')"
+                                style="padding:14px 10px;border-radius:12px;border:2px solid var(--border);background:white;cursor:pointer;font-weight:700;font-size:0.88rem;transition:.2s;display:flex;flex-direction:column;align-items:center;gap:4px;">
+                                <span style="font-size:1.3rem;">🫧</span>
+                                <span>Pod Only</span>
+                                <span style="color:var(--brand);font-size:1rem;font-weight:900;">₱450</span>
+                            </button>
+                        </div>
+                    </div>
+                    <!-- Step 2: Flavor -->
+                    <div id="chillaxStep2" style="display:none; margin-top:12px;">
+                        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                            <button type="button" onclick="chillaxBackToStep1()"
+                                style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:0.8rem;display:flex;align-items:center;gap:4px;padding:0;">
+                                <i class="fas fa-chevron-left"></i> Back
+                            </button>
+                            <div style="font-size:0.7rem;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);">Choose Flavor</div>
+                            <span id="chillaxVariantLabel" style="font-size:0.7rem;font-weight:700;color:var(--brand);background:var(--brand-light);padding:2px 8px;border-radius:20px;"></span>
+                        </div>
+                        <div id="chillaxFlavorList" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;max-height:260px;overflow-y:auto;"></div>
+                    </div>
+                </div>
+
                 <!-- Qty, Discount, and Total Row -->
                 <div class="fields-row">
                     <div class="field">
@@ -2395,6 +2431,41 @@ TEMPLATES["sales.html"] = """
 <script>
 const productsData = {{ products|tojson }};
 
+// ── Chillax Infinite Set: codename → flavor display name ──────────────────
+const CHILLAX_FLAVOR_MAP = {
+    'thunder blaze':    'Gatorade',
+    'very mellow':      'Watermelon',
+    'violet fusion':    'Taro Ice Cream',
+    'silver dynasty':   'Menthol Ice',
+    'cosmic crush':     'Grape',
+    'pink harmony':     'Juice Strawberry',
+    'rustic haze':      'Classic Tobacco',
+    'crystal wink':     'Bubblegum',
+    'click kick':       'Sour Apple',
+    'twilight willow':  'Blackcurrant',
+};
+
+// Emoji per flavor for extra flair
+const CHILLAX_FLAVOR_EMOJI = {
+    'thunder blaze':'⚡','very mellow':'🍉','violet fusion':'🍦',
+    'silver dynasty':'❄️','cosmic crush':'🍇','pink harmony':'🍓',
+    'rustic haze':'🚬','crystal wink':'🫧','click kick':'🍏','twilight willow':'🫐',
+};
+
+let chillaxSelectedType = null; // 'pod_device' | 'pod'
+
+function isChillaxQuery(q) {
+    return q.length >= 3 && 'chillax infinite set'.includes(q.toLowerCase().trim()) ||
+           q.toLowerCase().includes('chillax');
+}
+
+function getChillaxProducts() {
+    return Object.entries(productsData).filter(([id, p]) =>
+        p.name.toLowerCase().includes('chillax') ||
+        (p.name.toLowerCase().includes('infinite') && p.name.toLowerCase().includes('set'))
+    );
+}
+
 function showToast(msg, color = '#10b981') {
     const t = document.getElementById('toast');
     t.textContent = msg; t.style.borderBottom = `3px solid ${color}`;
@@ -2408,12 +2479,12 @@ function selectItem(id, label, price, stock, discount) {
     document.getElementById('hiddenKey').value = id;
     document.getElementById('productSearch').value = label;
     document.getElementById('searchResults').style.display = 'none';
+    document.getElementById('chillaxPicker').style.display = 'none';
 
     const discountNote = productDiscount > 0 ? ` — ${productDiscount}% OFF → ₱${finalPrice.toLocaleString(undefined,{minimumFractionDigits:2})}` : '';
     document.getElementById('badgeText').textContent = `${label} (In Stock: ${stock})${discountNote}`;
     document.getElementById('selectedBadge').classList.add('show');
 
-    // Store original price and product-level discount for calcTotal
     document.getElementById('qtyInput').dataset.basePrice = price;
     document.getElementById('qtyInput').dataset.productDiscount = productDiscount;
     document.getElementById('qtyInput').max = stock;
@@ -2424,12 +2495,36 @@ function selectItem(id, label, price, stock, discount) {
 }
 
 function filterProducts() {
-    const q = document.getElementById('productSearch').value.toLowerCase();
+    const q = document.getElementById('productSearch').value.toLowerCase().trim();
     const div = document.getElementById('searchResults');
+    const picker = document.getElementById('chillaxPicker');
     document.getElementById('saleBtn').disabled = true;
 
-    if (q.length < 1) { div.style.display = 'none'; return; }
+    if (q.length < 1) {
+        div.style.display = 'none';
+        picker.style.display = 'none';
+        return;
+    }
 
+    // ── Special Chillax Infinite Set flow ─────────────────────────────────
+    if (isChillaxQuery(q)) {
+        div.style.display = 'none';
+        picker.style.display = 'block';
+        // Reset to step 1 each time the user types
+        document.getElementById('chillaxStep1').style.display = 'block';
+        document.getElementById('chillaxStep2').style.display = 'none';
+        chillaxSelectedType = null;
+        // Reset variant button highlights
+        document.querySelectorAll('.chillax-variant-btn').forEach(b => {
+            b.style.borderColor = 'var(--border)';
+            b.style.background = 'white';
+            b.style.color = 'var(--text)';
+        });
+        return;
+    }
+
+    // ── Normal product search ──────────────────────────────────────────────
+    picker.style.display = 'none';
     const matches = Object.entries(productsData).filter(([id, p]) =>
         p.name.toLowerCase().includes(q) || (p.flavor||'').toLowerCase().includes(q)
     );
@@ -2441,6 +2536,59 @@ function filterProducts() {
         </div>
     `).join('');
     div.style.display = matches.length ? 'block' : 'none';
+}
+
+// Step 1 → Step 2: user picked Pod & Device or Pod
+function chillaxSelectType(type) {
+    chillaxSelectedType = type;
+    const targetPrice = type === 'pod_device' ? 600 : 450;
+    const label = type === 'pod_device' ? 'Pod & Device — ₱600' : 'Pod Only — ₱450';
+
+    // Highlight selected button
+    document.querySelectorAll('.chillax-variant-btn').forEach(b => {
+        b.style.borderColor = 'var(--border)';
+        b.style.background = 'white';
+        b.style.color = 'var(--text)';
+    });
+    const activeBtn = document.getElementById(type === 'pod_device' ? 'btnPodDevice' : 'btnPod');
+    activeBtn.style.borderColor = 'var(--brand)';
+    activeBtn.style.background = 'var(--brand-light)';
+    activeBtn.style.color = 'var(--brand)';
+
+    // Build flavor list
+    // Filter Chillax products by price matching target (or show all if no price match — fallback)
+    let chillaxProds = getChillaxProducts();
+    let priceMatched = chillaxProds.filter(([id, p]) => Math.round(p.price) === targetPrice);
+    const flavors = priceMatched.length ? priceMatched : chillaxProds;
+
+    const flavorList = document.getElementById('chillaxFlavorList');
+    flavorList.innerHTML = flavors.map(([id, p]) => {
+        const codeKey = (p.flavor || '').toLowerCase().trim();
+        const flavorName = CHILLAX_FLAVOR_MAP[codeKey] || p.flavor;
+        const emoji = CHILLAX_FLAVOR_EMOJI[codeKey] || '🌿';
+        const codename = p.flavor || '';
+        const safeLabel = `Chillax Infinite Set (${type === 'pod_device' ? 'Pod & Device' : 'Pod'}) - ${codename}`;
+        return `
+        <div onclick="selectItem('${id}','${safeLabel.replace(/'/g,"\\'")}',${p.price},${p.qty},${p.discount||0})"
+             style="padding:10px 12px;border-radius:10px;border:1.5px solid var(--border);background:white;cursor:pointer;transition:.2s;"
+             onmouseover="this.style.borderColor='var(--brand)';this.style.background='var(--brand-light)';"
+             onmouseout="this.style.borderColor='var(--border)';this.style.background='white';">
+            <div style="font-size:1.1rem;margin-bottom:2px;">${emoji}</div>
+            <div style="font-size:0.78rem;font-weight:800;color:var(--text);">${codename}</div>
+            <div style="font-size:0.7rem;color:var(--brand);font-weight:600;">${flavorName}</div>
+            <div style="font-size:0.68rem;color:var(--muted);margin-top:2px;">Stock: ${p.qty}</div>
+        </div>`;
+    }).join('');
+
+    document.getElementById('chillaxVariantLabel').textContent = label;
+    document.getElementById('chillaxStep1').style.display = 'none';
+    document.getElementById('chillaxStep2').style.display = 'block';
+}
+
+function chillaxBackToStep1() {
+    document.getElementById('chillaxStep1').style.display = 'block';
+    document.getElementById('chillaxStep2').style.display = 'none';
+    chillaxSelectedType = null;
 }
 
 function calcTotal() {
@@ -2468,10 +2616,15 @@ function clearSale() {
     document.getElementById('totalBox').innerHTML = '₱ 0.00';
     document.getElementById('selectedBadge').classList.remove('show');
     document.getElementById('saleBtn').disabled = true;
+    document.getElementById('chillaxPicker').style.display = 'none';
+    document.getElementById('chillaxStep1').style.display = 'block';
+    document.getElementById('chillaxStep2').style.display = 'none';
 }
 
 window.addEventListener('click', e => {
-    if (!e.target.matches('#productSearch')) document.getElementById('searchResults').style.display = 'none';
+    if (!e.target.closest('#productSearch') && !e.target.closest('#chillaxPicker')) {
+        document.getElementById('searchResults').style.display = 'none';
+    }
 });
 </script>
 {% endblock %}
