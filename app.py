@@ -1743,37 +1743,132 @@ TEMPLATES["inventory.html"] = """
 
     .header-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 
-    /* --- PRINT STYLES --- */
+    /* ─── PRINT PREVIEW MODAL ─── */
+    #invPrintModal {
+        display: none; position: fixed; inset: 0; z-index: 9999;
+        background: rgba(10,10,20,0.72); backdrop-filter: blur(6px);
+        align-items: flex-start; justify-content: center; padding: 20px;
+        overflow-y: auto;
+    }
+    #invPrintModal.open { display: flex; }
+    .ipm-shell {
+        background: #fff; width: 100%; max-width: 860px;
+        border-radius: 18px; overflow: hidden;
+        box-shadow: 0 30px 80px rgba(0,0,0,0.4);
+        margin: auto;
+    }
+    .ipm-toolbar {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 14px 20px; background: #162135; color: white;
+        gap: 12px; flex-wrap: wrap;
+    }
+    .ipm-toolbar-title { font-size: 0.9rem; font-weight: 800; letter-spacing: 0.5px; }
+    .ipm-btn {
+        display: inline-flex; align-items: center; gap: 7px;
+        padding: 8px 18px; border-radius: 8px; border: none;
+        font-weight: 700; font-size: 0.82rem; cursor: pointer;
+        transition: 0.2s;
+    }
+    .ipm-btn-print { background: #705194; color: white; }
+    .ipm-btn-print:hover { background: #5a3d7a; }
+    .ipm-btn-close { background: rgba(255,255,255,0.12); color: white; }
+    .ipm-btn-close:hover { background: rgba(255,255,255,0.22); }
+    .ipm-page-wrap { background: #e8eaf0; padding: 24px; overflow-y: auto; max-height: 78vh; }
+    .ipm-page {
+        background: white; width: 100%; max-width: 790px;
+        margin: 0 auto; padding: 36px 44px;
+        box-shadow: 0 4px 24px rgba(0,0,0,0.14);
+        font-family: 'Inter', 'Outfit', sans-serif;
+        color: #162135;
+    }
+
+    /* ─── PRINT-ONLY HEADER (invisible on screen, visible in print) ─── */
+    .print-doc-header { display: none; }
+
+    /* ─── PRINT STYLES ─── */
+    @page {
+        size: A4 landscape;
+        margin: 18mm 14mm 16mm;
+    }
     @media print {
+        /* ── Hide all UI chrome ── */
         .sidebar, .mobile-header, .mobile-toggle, .no-print,
-        .cat-filters, .search-box, .list-header > *:last-child,
-        .flash-container { display: none !important; }
+        .cat-filters, .header-right, .search-box,
+        .flash-container, #invPrintModal,
+        .list-header > div:last-child { display: none !important; }
 
-        body { background: white !important; }
-        .main-content { margin-left: 0 !important; width: 100% !important; padding: 20px !important; }
+        html, body { background: white !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        .main-content { margin-left: 0 !important; width: 100% !important; padding: 0 !important; }
         .inventory-container { padding: 0 !important; }
+        .header-flex { display: none !important; }
 
-        .header-flex { margin-bottom: 12px !important; }
-        .header-title h1 { font-size: 1.4rem !important; }
+        /* ── Show print-only header ── */
+        .print-doc-header {
+            display: block !important;
+            padding: 0 0 18px; margin-bottom: 18px;
+            border-bottom: 3px solid #162135;
+        }
+        .pdh-top { display: flex; justify-content: space-between; align-items: flex-end; }
+        .pdh-brand h1 {
+            font-size: 1.5rem; font-weight: 900; letter-spacing: 1.5px;
+            color: #162135; margin: 0 0 3px;
+        }
+        .pdh-brand p { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 1px; color: #64748b; margin: 0; }
+        .pdh-meta { text-align: right; }
+        .pdh-meta .pdh-report-type {
+            font-size: 0.9rem; font-weight: 800; color: #705194;
+            text-transform: uppercase; letter-spacing: 0.5px;
+        }
+        .pdh-meta .pdh-date { font-size: 0.68rem; color: #94a3b8; margin-top: 3px; }
+        .pdh-summary {
+            display: flex; gap: 0; margin-top: 14px;
+            border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;
+        }
+        .pdh-stat {
+            flex: 1; padding: 10px 16px; border-right: 1px solid #e2e8f0; text-align: center;
+        }
+        .pdh-stat:last-child { border-right: none; }
+        .pdh-stat-label { font-size: 0.55rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; color: #94a3b8; }
+        .pdh-stat-value { font-size: 1.05rem; font-weight: 900; color: #162135; margin-top: 2px; }
+        .pdh-stat-value.c-green  { color: #10b981; }
+        .pdh-stat-value.c-red    { color: #ef4444; }
+        .pdh-stat-value.c-purple { color: #705194; }
 
-        .list-card { box-shadow: none !important; border: 1px solid #ddd !important; padding: 16px !important; }
-        .list-header { margin-bottom: 12px !important; }
-
-        /* Make all columns print-visible */
+        /* ── Card & table ── */
+        .list-card { box-shadow: none !important; border: none !important; padding: 0 !important; }
+        .list-header { display: none !important; }
         .table-responsive { overflow: visible !important; }
-        .product-table { min-width: unset !important; width: 100% !important; font-size: 0.75rem !important; }
-        .product-table th, .product-table td { padding: 8px 10px !important; }
+        .product-table { min-width: unset !important; width: 100% !important; font-size: 0.7rem !important; border-collapse: collapse; }
+        .product-table th {
+            padding: 7px 9px !important; background: #162135 !important;
+            color: white !important; font-size: 0.58rem !important;
+            -webkit-print-color-adjust: exact; print-color-adjust: exact;
+        }
+        .product-table td { padding: 6px 9px !important; border-bottom: 1px solid #f1f5f9 !important; }
+        .product-table tbody tr:nth-child(even) td { background: #f8f9ff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 
-        /* Strip image column to save space */
+        /* ── Hide image column ── */
         .product-table th:first-child,
         .product-table td:first-child { display: none !important; }
 
-        /* Print header watermark */
-        .list-header::after {
-            content: "F.L.E.X VAPE SHOP — Inventory Report";
-            display: block; font-size: 0.65rem; color: #94a3b8;
-            font-style: italic; margin-top: 4px;
+        /* ── Stock pill colors in print ── */
+        .stock-pill { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        .stock-ok   { background: #d1fae5 !important; color: #065f46 !important; }
+        .stock-low  { background: #fee2e2 !important; color: #991b1b !important; }
+        .stock-out  { background: #f3f4f6 !important; color: #4b5563 !important; }
+        .badge-cat  { background: #e0e7ff !important; color: #4338ca !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+        /* ── Print footer ── */
+        .print-doc-footer {
+            display: flex !important; justify-content: space-between; align-items: center;
+            margin-top: 18px; padding-top: 10px; border-top: 1px solid #e2e8f0;
+            font-size: 0.58rem; color: #94a3b8;
         }
+        .print-doc-footer-hidden { display: none; }
+
+        /* ── Page breaks for long tables ── */
+        .product-table thead { display: table-header-group; }
+        .product-table tbody tr { page-break-inside: avoid; }
     }
 
     @media (max-width: 768px) {
@@ -1783,7 +1878,42 @@ TEMPLATES["inventory.html"] = """
     }
 </style>
 
+<!-- ═══ PRINT PREVIEW MODAL ═══ -->
+<div id="invPrintModal">
+    <div class="ipm-shell">
+        <div class="ipm-toolbar">
+            <span class="ipm-toolbar-title"><i class="fas fa-print" style="margin-right:8px;opacity:.8;"></i>Print Preview — Inventory Report</span>
+            <div style="display:flex;gap:8px;">
+                <button class="ipm-btn ipm-btn-print" onclick="confirmInvPrint()"><i class="fas fa-print"></i> Print Now</button>
+                <button class="ipm-btn ipm-btn-close" onclick="closeInvPreview()"><i class="fas fa-times"></i> Close</button>
+            </div>
+        </div>
+        <div class="ipm-page-wrap">
+            <div class="ipm-page" id="invPreviewContent"></div>
+        </div>
+    </div>
+</div>
+
 <div class="inventory-container">
+
+    <!-- PRINT-ONLY HEADER (hidden on screen, shown when printing) -->
+    <div class="print-doc-header" id="printDocHeader">
+        <div class="pdh-top">
+            <div class="pdh-brand">
+                <h1>F.L.E.X VAPE SHOP</h1>
+                <p>Inventory Management System &bull; Stock Level Report</p>
+            </div>
+            <div class="pdh-meta">
+                <div class="pdh-report-type">Inventory Report</div>
+                <div class="pdh-date" id="pdh-date-stamp"></div>
+            </div>
+        </div>
+        <div class="pdh-summary" id="pdh-summary-bar"></div>
+    </div>
+    <div class="print-doc-footer" style="display:none;" id="printDocFooter">
+        <span>F.L.E.X Inventory Management System &bull; Confidential</span>
+        <span id="pdh-footer-ts"></span>
+    </div>
     
     <!-- HEADER -->
     <div class="header-flex">
@@ -1791,7 +1921,7 @@ TEMPLATES["inventory.html"] = """
             <h1>Inventory</h1>
         </div>
         <div class="header-right">
-            <button class="print-btn no-print" onclick="window.print()">
+            <button class="print-btn no-print" onclick="openInvPreview()">
                 <i class="fas fa-print"></i> Print
             </button>
             <div class="cat-filters">
@@ -1934,6 +2064,159 @@ TEMPLATES["inventory.html"] = """
         const tbody = document.querySelector("#invTable tbody");
         const rows = Array.from(tbody.querySelectorAll("tr"));
         rows.forEach((row, i) => row.dataset.origIndex = i);
+    });
+
+    /* ══════════════════════════════════════════════════════
+       PRINT PREVIEW SYSTEM
+    ══════════════════════════════════════════════════════ */
+    function _getInvStats() {
+        const rows = Array.from(document.querySelectorAll('#invTable tbody tr'));
+        const visible = rows.filter(r => r.style.display !== 'none');
+        let totalSkus = visible.length, totalUnits = 0, outCount = 0, lowCount = 0, totalValue = 0;
+        visible.forEach(row => {
+            const tds = row.querySelectorAll('td');
+            if (tds.length < 9) return;
+            const qtyText  = tds[9]  ? tds[9].textContent.replace(/[^0-9]/g,'') : '0';
+            const priceText= tds[8]  ? tds[8].textContent.replace(/[₱,]/g,'').trim() : '0';
+            const qty   = parseInt(qtyText) || 0;
+            const price = parseFloat(priceText) || 0;
+            totalUnits += qty;
+            totalValue += qty * price;
+            if (qty <= 0)      outCount++;
+            else if (qty < 5)  lowCount++;
+        });
+        return { totalSkus, totalUnits, outCount, lowCount, totalValue };
+    }
+
+    function openInvPreview() {
+        const now = new Date();
+        const dateStr = now.toLocaleString('en-PH', { year:'numeric', month:'long', day:'numeric', hour:'2-digit', minute:'2-digit' });
+        const stats = _getInvStats();
+
+        // ── Populate the real print header (used in actual print) ──
+        document.getElementById('pdh-date-stamp').textContent = 'Generated: ' + dateStr;
+        document.getElementById('pdh-footer-ts').textContent  = 'Generated: ' + dateStr + '  |  Page 1';
+        document.getElementById('pdh-summary-bar').innerHTML =
+            _statChip('Total SKUs',   stats.totalSkus,   '') +
+            _statChip('Total Units',  stats.totalUnits,  '') +
+            _statChip('Out of Stock', stats.outCount,    stats.outCount > 0 ? 'c-red' : 'c-green') +
+            _statChip('Low Stock',    stats.lowCount,    stats.lowCount > 0 ? 'c-red' : 'c-green') +
+            _statChip('Inventory Value', '₱'+stats.totalValue.toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2}), 'c-purple');
+
+        // ── Build preview HTML ──
+        const visibleRows = Array.from(document.querySelectorAll('#invTable tbody tr'))
+            .filter(r => r.style.display !== 'none');
+
+        let tableRows = '';
+        visibleRows.forEach((row, i) => {
+            const tds = row.querySelectorAll('td');
+            if (tds.length < 10) return;
+            const code    = tds[1]  ? tds[1].textContent.trim()  : '—';
+            const name    = tds[2]  ? tds[2].textContent.trim()  : '—';
+            const flavor  = tds[3]  ? tds[3].textContent.trim()  : '—';
+            const cat     = tds[4]  ? tds[4].textContent.trim()  : '—';
+            const ver     = tds[5]  ? tds[5].textContent.trim()  : '—';
+            const mg      = tds[6]  ? tds[6].textContent.trim()  : '—';
+            const cost    = tds[7]  ? tds[7].textContent.trim()  : '—';
+            const price   = tds[8]  ? tds[8].textContent.trim()  : '—';
+            const qtyEl   = tds[9]  ? tds[9].innerHTML : '';
+            const qtyNum  = parseInt((tds[9] ? tds[9].textContent : '0').replace(/[^0-9]/g,'')) || 0;
+
+            let qtyCell, rowBg='';
+            if (qtyNum <= 0)     { qtyCell='<span style="background:#f3f4f6;color:#4b5563;padding:3px 10px;border-radius:50px;font-size:0.68rem;font-weight:800;">OUT</span>'; rowBg='#fff5f5'; }
+            else if (qtyNum < 5) { qtyCell='<span style="background:#fee2e2;color:#991b1b;padding:3px 10px;border-radius:50px;font-size:0.68rem;font-weight:800;">'+qtyNum+' PCS ⚠</span>'; rowBg='#fffaf0'; }
+            else                 { qtyCell='<span style="background:#d1fae5;color:#065f46;padding:3px 10px;border-radius:50px;font-size:0.68rem;font-weight:800;">'+qtyNum+' PCS</span>'; }
+
+            tableRows += `<tr style="background:${rowBg||( i%2===0 ? '#fff':'#f8f9ff' )};">
+                <td style="color:#94a3b8;font-weight:700;font-size:0.65rem;text-align:center;">${i+1}</td>
+                <td><span style="background:#ede9f8;color:#705194;padding:2px 7px;border-radius:5px;font-size:0.68rem;font-weight:800;font-family:monospace;">${code||'—'}</span></td>
+                <td style="font-weight:700;font-size:0.78rem;">${name}</td>
+                <td style="color:#705194;font-weight:600;font-size:0.75rem;">${flavor||'—'}</td>
+                <td><span style="background:#e0e7ff;color:#4338ca;padding:2px 8px;border-radius:50px;font-size:0.62rem;font-weight:800;text-transform:uppercase;">${cat}</span></td>
+                <td style="font-size:0.72rem;color:#64748b;">${ver||'—'}</td>
+                <td style="font-size:0.72rem;color:#64748b;">${mg||'—'}</td>
+                <td style="font-size:0.72rem;color:#64748b;">${cost}</td>
+                <td style="font-weight:700;color:#162135;">${price}</td>
+                <td>${qtyCell}</td>
+            </tr>`;
+        });
+
+        const previewHTML = `
+            <div style="padding:0;font-family:'Inter','Outfit',sans-serif;color:#162135;">
+                <!-- HEADER -->
+                <div style="border-bottom:3px solid #162135;padding-bottom:16px;margin-bottom:18px;">
+                    <div style="display:flex;justify-content:space-between;align-items:flex-end;">
+                        <div>
+                            <div style="font-size:1.45rem;font-weight:900;letter-spacing:1.5px;color:#162135;margin:0 0 3px;">F.L.E.X VAPE SHOP</div>
+                            <div style="font-size:0.6rem;text-transform:uppercase;letter-spacing:1px;color:#64748b;">Inventory Management System &bull; Stock Level Report</div>
+                        </div>
+                        <div style="text-align:right;">
+                            <div style="font-size:0.9rem;font-weight:800;color:#705194;text-transform:uppercase;letter-spacing:0.5px;">Inventory Report</div>
+                            <div style="font-size:0.65rem;color:#94a3b8;margin-top:3px;">Generated: ${dateStr}</div>
+                        </div>
+                    </div>
+                    <!-- SUMMARY BAR -->
+                    <div style="display:flex;gap:0;margin-top:14px;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
+                        ${_previewStatChip('Total SKUs',   stats.totalSkus,   '#162135')}
+                        ${_previewStatChip('Total Units',  stats.totalUnits,  '#162135')}
+                        ${_previewStatChip('Out of Stock', stats.outCount,    stats.outCount > 0 ? '#ef4444':'#10b981')}
+                        ${_previewStatChip('Low Stock',    stats.lowCount,    stats.lowCount > 0 ? '#ef4444':'#10b981')}
+                        ${_previewStatChip('Inventory Value', '₱'+stats.totalValue.toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2}), '#705194', true)}
+                    </div>
+                </div>
+                <!-- TABLE -->
+                <table style="width:100%;border-collapse:collapse;font-size:0.72rem;">
+                    <thead>
+                        <tr style="background:#162135;">
+                            <th style="padding:8px 9px;color:white;font-size:0.58rem;text-transform:uppercase;text-align:center;letter-spacing:.5px;">#</th>
+                            <th style="padding:8px 9px;color:white;font-size:0.58rem;text-transform:uppercase;letter-spacing:.5px;">Code</th>
+                            <th style="padding:8px 9px;color:white;font-size:0.58rem;text-transform:uppercase;letter-spacing:.5px;">Product Name</th>
+                            <th style="padding:8px 9px;color:white;font-size:0.58rem;text-transform:uppercase;letter-spacing:.5px;">Flavor</th>
+                            <th style="padding:8px 9px;color:white;font-size:0.58rem;text-transform:uppercase;letter-spacing:.5px;">Category</th>
+                            <th style="padding:8px 9px;color:white;font-size:0.58rem;text-transform:uppercase;letter-spacing:.5px;">Version</th>
+                            <th style="padding:8px 9px;color:white;font-size:0.58rem;text-transform:uppercase;letter-spacing:.5px;">ML/MG</th>
+                            <th style="padding:8px 9px;color:white;font-size:0.58rem;text-transform:uppercase;letter-spacing:.5px;">Cost</th>
+                            <th style="padding:8px 9px;color:white;font-size:0.58rem;text-transform:uppercase;letter-spacing:.5px;">Price</th>
+                            <th style="padding:8px 9px;color:white;font-size:0.58rem;text-transform:uppercase;letter-spacing:.5px;text-align:center;">Stock</th>
+                        </tr>
+                    </thead>
+                    <tbody>${tableRows}</tbody>
+                </table>
+                <!-- FOOTER -->
+                <div style="margin-top:18px;padding-top:10px;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;font-size:0.58rem;color:#94a3b8;">
+                    <span>F.L.E.X Inventory Management System &bull; Confidential</span>
+                    <span>Generated: ${dateStr}</span>
+                </div>
+            </div>`;
+
+        document.getElementById('invPreviewContent').innerHTML = previewHTML;
+        document.getElementById('invPrintModal').classList.add('open');
+        document.body.style.overflow = 'hidden';
+    }
+
+    function closeInvPreview() {
+        document.getElementById('invPrintModal').classList.remove('open');
+        document.body.style.overflow = '';
+    }
+
+    function confirmInvPrint() {
+        closeInvPreview();
+        setTimeout(() => window.print(), 80);
+    }
+
+    function _statChip(label, value, colorClass) {
+        return `<div class="pdh-stat"><div class="pdh-stat-label">${label}</div><div class="pdh-stat-value ${colorClass}">${value}</div></div>`;
+    }
+    function _previewStatChip(label, value, color, noBorder) {
+        return `<div style="flex:1;padding:10px 14px;border-right:${noBorder?'none':'1px solid #e2e8f0'};text-align:center;">
+            <div style="font-size:0.55rem;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:#94a3b8;">${label}</div>
+            <div style="font-size:1.05rem;font-weight:900;color:${color};margin-top:2px;">${value}</div>
+        </div>`;
+    }
+
+    // Close modal on backdrop click
+    document.getElementById('invPrintModal').addEventListener('click', function(e) {
+        if (e.target === this) closeInvPreview();
     });
 </script>
 {% endblock %}
@@ -2953,22 +3236,112 @@ TEMPLATES["reports.html"] = """
         .report-meta { text-align:left; }
     }
 
+    /* ===== PRINT PREVIEW MODAL ===== */
+    #rptPrintModal {
+        display:none; position:fixed; inset:0; z-index:9999;
+        background:rgba(10,10,20,0.72); backdrop-filter:blur(6px);
+        align-items:flex-start; justify-content:center; padding:20px; overflow-y:auto;
+    }
+    #rptPrintModal.open { display:flex; }
+    .rpm-shell {
+        background:#fff; width:100%; max-width:900px;
+        border-radius:18px; overflow:hidden;
+        box-shadow:0 30px 80px rgba(0,0,0,0.4); margin:auto;
+    }
+    .rpm-toolbar {
+        display:flex; align-items:center; justify-content:space-between;
+        padding:14px 20px; background:var(--brand-navy); color:white; gap:12px; flex-wrap:wrap;
+    }
+    .rpm-toolbar-title { font-size:0.9rem; font-weight:800; letter-spacing:0.5px; }
+    .rpm-btn {
+        display:inline-flex; align-items:center; gap:7px;
+        padding:8px 18px; border-radius:8px; border:none;
+        font-weight:700; font-size:0.82rem; cursor:pointer; transition:0.2s;
+    }
+    .rpm-btn-print { background:var(--brand-purple); color:white; }
+    .rpm-btn-print:hover { background:#5a3d7a; }
+    .rpm-btn-close { background:rgba(255,255,255,0.12); color:white; }
+    .rpm-btn-close:hover { background:rgba(255,255,255,0.22); }
+    .rpm-page-wrap { background:#e8eaf0; padding:24px; overflow-y:auto; max-height:80vh; }
+
+    /* ===== PAGE SETUP ===== */
+    @page { size: A4 portrait; margin: 16mm 14mm 16mm; }
+
     /* ===== PRINT ===== */
     @media print {
         nav, .sidebar, .mobile-header, .mobile-toggle, .no-print, .swipe-hint,
-        .flash-container, .period-selector { display: none !important; }
-        body { background: white; margin: 0; padding: 0; }
+        .flash-container, .period-selector, .report-controls, #rptPrintModal { display: none !important; }
+
+        html, body { background: white !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         .main-content { margin-left: 0 !important; width: 100% !important; padding: 0 !important; }
-        #report-capture-area { border: none; box-shadow: none; padding: 30px; border-radius: 0; }
-        .table-responsive { overflow: visible !important; }
-        .warn-table-wrap { overflow: visible !important; }
-        .report-grid { grid-template-columns: repeat(2, 1fr) !important; }
-        .report-controls { display: none !important; }
+
+        /* Document area */
+        #report-capture-area {
+            border: none !important; box-shadow: none !important;
+            padding: 28px 32px !important; border-radius: 0 !important;
+            width: 100% !important; max-width: none !important;
+        }
+
+        /* Tables */
+        .table-responsive { overflow: visible !important; border: 1px solid #e2e8f0 !important; border-radius: 8px !important; }
+        .warn-table-wrap  { overflow: visible !important; }
+        .report-table, .warn-table { font-size: 0.7rem !important; }
+        .report-table th  { background: #162135 !important; color: white !important; padding: 7px 10px !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        .report-table td  { padding: 6px 10px !important; }
+        .warn-table th    { background: #fff1f2 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+        /* KPI grid */
+        .report-grid { grid-template-columns: repeat(4, 1fr) !important; gap: 10px !important; }
+        .stat-card {
+            box-shadow: none !important; border: 1px solid #e2e8f0 !important;
+            padding: 12px !important; -webkit-print-color-adjust: exact; print-color-adjust: exact;
+        }
+        .stat-card .value { font-size: 1.2rem !important; }
+
+        /* Colour badges */
+        .net-pos, .net-neg, .net-zero, .cat-chip-sm, .sev-out, .sev-critical, .sev-low, .cat-perf-card {
+            -webkit-print-color-adjust: exact; print-color-adjust: exact;
+        }
+        .net-pos  { background: #d1fae5 !important; color: #065f46 !important; }
+        .net-neg  { background: #fee2e2 !important; color: #991b1b !important; }
+        .net-zero { background: #f1f5f9 !important; color: #64748b !important; }
+        .row-positive td { background: rgba(16,185,129,.06) !important; }
+        .row-negative td { background: rgba(239,68,68,.06)  !important; }
+
+        /* Gross Profit card visible */
+        .gross-profit-print { display: block !important; }
+
+        /* Headers */
+        .doc-header { border-bottom: 3px solid #162135 !important; padding-bottom: 16px !important; }
+        .brand-block h2 { font-size: 1.4rem !important; }
+        .report-period-badge { background: #f3eeff !important; color: #705194 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+        /* Page breaks */
+        .section-heading { page-break-before: auto; margin-top: 20px !important; }
+        .report-table thead, .warn-table thead { display: table-header-group; }
+        .report-table tbody tr, .warn-table tbody tr { page-break-inside: avoid; }
+
+        /* Footer */
+        .doc-footer { border-top: 1px solid #e2e8f0 !important; margin-top: 24px !important; }
         a { text-decoration: none !important; }
-        .stat-card { box-shadow: none !important; border: 1px solid #e2e8f0 !important; }
-        .report-table th, .log-table th { background: #f8fafc !important; -webkit-print-color-adjust: exact; }
     }
 </style>
+
+<!-- ═══ PRINT PREVIEW MODAL ═══ -->
+<div id="rptPrintModal">
+    <div class="rpm-shell">
+        <div class="rpm-toolbar">
+            <span class="rpm-toolbar-title"><i class="fas fa-file-pdf" style="margin-right:8px;opacity:.8;"></i>Print Preview — {{ report_label }}</span>
+            <div style="display:flex;gap:8px;">
+                <button class="rpm-btn rpm-btn-print" onclick="confirmRptPrint()"><i class="fas fa-print"></i> Print / Save PDF</button>
+                <button class="rpm-btn rpm-btn-close" onclick="closeRptPreview()"><i class="fas fa-times"></i> Close</button>
+            </div>
+        </div>
+        <div class="rpm-page-wrap">
+            <div id="rptPreviewMount"></div>
+        </div>
+    </div>
+</div>
 
 <div class="report-ui-wrapper">
 
@@ -2983,8 +3356,8 @@ TEMPLATES["reports.html"] = """
             <button onclick="exportCSV()" class="btn-action btn-csv">
                 <i class="fas fa-file-csv"></i> CSV
             </button>
-            <button onclick="window.print()" class="btn-action btn-pdf">
-                <i class="fas fa-file-pdf"></i> PDF
+            <button onclick="openRptPreview()" class="btn-action btn-pdf">
+                <i class="fas fa-file-pdf"></i> PDF / Print
             </button>
             <button onclick="downloadReportImage()" class="btn-action btn-img">
                 <i class="fas fa-image"></i> Image
@@ -3242,6 +3615,38 @@ function exportCSV() {
     link.download = 'FLEX_StockMovement_{{ date }}.csv';
     link.click();
 }
+
+/* ──── Print Preview ──── */
+function openRptPreview() {
+    const mount = document.getElementById('rptPreviewMount');
+    const src = document.getElementById('report-capture-area');
+    // Clone the capture area and inject it into the preview container at preview scale
+    const clone = src.cloneNode(true);
+    clone.style.cssText = 'background:white;padding:32px 36px;font-family:Inter,Outfit,sans-serif;color:#162135;width:100%;box-sizing:border-box;';
+    // Add a "Preview Mode" watermark strip
+    const strip = document.createElement('div');
+    strip.style.cssText = 'background:#f0f4ff;border:1px solid #c7d2fe;border-radius:8px;padding:8px 14px;font-size:0.7rem;font-weight:700;color:#3730a3;margin-bottom:20px;display:flex;align-items:center;gap:8px;';
+    strip.innerHTML = '<i class="fas fa-eye"></i> Print Preview &mdash; This is how your document will look when printed or saved as PDF.';
+    mount.innerHTML = '';
+    mount.appendChild(strip);
+    mount.appendChild(clone);
+    document.getElementById('rptPrintModal').classList.add('open');
+    document.body.style.overflow = 'hidden';
+}
+
+function closeRptPreview() {
+    document.getElementById('rptPrintModal').classList.remove('open');
+    document.body.style.overflow = '';
+}
+
+function confirmRptPrint() {
+    closeRptPreview();
+    setTimeout(() => window.print(), 80);
+}
+
+document.getElementById('rptPrintModal').addEventListener('click', function(e) {
+    if (e.target === this) closeRptPreview();
+});
 </script>
 {% endblock %}
 """
@@ -4792,20 +5197,100 @@ TEMPLATES["purchase_report.html"] = """
         .period-selector { min-width: 100%; }
     }
 
+    /* ── Print Preview Modal ── */
+    #purPrintModal {
+        display:none; position:fixed; inset:0; z-index:9999;
+        background:rgba(10,10,20,0.72); backdrop-filter:blur(6px);
+        align-items:flex-start; justify-content:center; padding:20px; overflow-y:auto;
+    }
+    #purPrintModal.open { display:flex; }
+    .ppm-shell {
+        background:#fff; width:100%; max-width:900px;
+        border-radius:18px; overflow:hidden;
+        box-shadow:0 30px 80px rgba(0,0,0,0.4); margin:auto;
+    }
+    .ppm-toolbar {
+        display:flex; align-items:center; justify-content:space-between;
+        padding:14px 20px; background:#162135; color:white; gap:12px; flex-wrap:wrap;
+    }
+    .ppm-toolbar-title { font-size:0.9rem; font-weight:800; letter-spacing:0.5px; }
+    .ppm-btn {
+        display:inline-flex; align-items:center; gap:7px;
+        padding:8px 18px; border-radius:8px; border:none;
+        font-weight:700; font-size:0.82rem; cursor:pointer; transition:0.2s;
+    }
+    .ppm-btn-print { background:var(--brand-purple); color:white; }
+    .ppm-btn-print:hover { background:#5a3d7a; }
+    .ppm-btn-close { background:rgba(255,255,255,0.12); color:white; }
+    .ppm-btn-close:hover { background:rgba(255,255,255,0.22); }
+    .ppm-page-wrap { background:#e8eaf0; padding:24px; overflow-y:auto; max-height:80vh; }
+
+    /* ── Page setup ── */
+    @page { size: A4 portrait; margin: 16mm 14mm 16mm; }
+
     @media print {
         nav, .sidebar, .mobile-header, .mobile-toggle, .no-print, header,
-        .swipe-hint, .flash-container, .report-controls { display: none !important; }
-        body { background: white; margin: 0; padding: 0; }
+        .swipe-hint, .flash-container, .report-controls, #purPrintModal { display: none !important; }
+        html, body { background: white !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         .main-content { margin-left: 0 !important; width: 100% !important; padding: 0 !important; }
-        #report-capture-area { border: none; box-shadow: none; padding: 30px; width: 100%; border-radius: 0; }
+        #report-capture-area {
+            border: none !important; box-shadow: none !important;
+            padding: 28px 32px !important; width: 100% !important; border-radius: 0 !important;
+        }
+        /* Tables */
         .table-responsive { overflow: visible !important; }
-        .report-table, .log-table { min-width: unset !important; width: 100% !important; font-size: 0.72rem !important; }
-        .report-table th, .log-table th { background: #f1f5f9 !important; -webkit-print-color-adjust: exact; }
-        .stat-card { box-shadow: none !important; border: 1px solid #e2e8f0 !important; }
-        .report-grid { grid-template-columns: repeat(3, 1fr) !important; }
+        .report-table, .log-table {
+            min-width: unset !important; width: 100% !important; font-size: 0.7rem !important;
+        }
+        .report-table th, .log-table th {
+            background: #162135 !important; color: white !important;
+            -webkit-print-color-adjust: exact; print-color-adjust: exact;
+            padding: 7px 9px !important;
+        }
+        .report-table td, .log-table td { padding: 6px 9px !important; }
+        .report-table tbody tr:nth-child(even) td, .log-table tbody tr:nth-child(even) td {
+            background: #f8f9ff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact;
+        }
+        /* KPI */
+        .stat-card {
+            box-shadow: none !important; border: 1px solid #e2e8f0 !important;
+            -webkit-print-color-adjust: exact; print-color-adjust: exact;
+        }
+        .report-grid { grid-template-columns: repeat(3, 1fr) !important; gap: 10px !important; }
+        .stat-card .value { font-size: 1.2rem !important; }
+        /* Badges */
+        .qty-badge, .report-period-badge, .cat-chip {
+            -webkit-print-color-adjust: exact; print-color-adjust: exact;
+        }
+        .qty-badge { background: #d1fae5 !important; color: #065f46 !important; border-color: #a7f3d0 !important; }
+        /* Doc header */
+        .doc-header { border-bottom: 3px solid #162135 !important; }
+        /* Category chips */
+        .cat-grid { page-break-inside: avoid; }
+        /* Page breaks */
+        .report-table thead, .log-table thead { display: table-header-group; }
+        .report-table tbody tr, .log-table tbody tr { page-break-inside: avoid; }
+        /* Footer */
+        .doc-footer { border-top: 1px solid #e2e8f0 !important; }
         a { text-decoration: none !important; }
     }
 </style>
+
+<!-- ═══ PURCHASE REPORT PRINT PREVIEW MODAL ═══ -->
+<div id="purPrintModal">
+    <div class="ppm-shell">
+        <div class="ppm-toolbar">
+            <span class="ppm-toolbar-title"><i class="fas fa-file-pdf" style="margin-right:8px;opacity:.8;"></i>Print Preview — Purchase Report</span>
+            <div style="display:flex;gap:8px;">
+                <button class="ppm-btn ppm-btn-print" onclick="confirmPurPrint()"><i class="fas fa-print"></i> Print / Save PDF</button>
+                <button class="ppm-btn ppm-btn-close" onclick="closePurPreview()"><i class="fas fa-times"></i> Close</button>
+            </div>
+        </div>
+        <div class="ppm-page-wrap">
+            <div id="purPreviewMount"></div>
+        </div>
+    </div>
+</div>
 
 <div class="report-ui-wrapper">
 
@@ -4818,8 +5303,8 @@ TEMPLATES["purchase_report.html"] = """
         </div>
 
         <div class="btn-group">
-            <button onclick="window.print()" class="btn-action btn-pdf">
-                <i class="fas fa-file-pdf"></i> PDF
+            <button onclick="openPurPreview()" class="btn-action btn-pdf">
+                <i class="fas fa-file-pdf"></i> PDF / Print
             </button>
             <button onclick="downloadReportImage()" class="btn-action btn-img">
                 <i class="fas fa-image"></i> IMAGE
@@ -4975,6 +5460,36 @@ async function downloadReportImage() {
         downloadBtn.disabled = false;
     }
 }
+
+/* ──── Purchase Report Print Preview ──── */
+function openPurPreview() {
+    const mount = document.getElementById('purPreviewMount');
+    const src   = document.getElementById('report-capture-area');
+    const clone = src.cloneNode(true);
+    clone.style.cssText = 'background:white;padding:32px 36px;font-family:Inter,sans-serif;color:#162135;width:100%;box-sizing:border-box;';
+    const strip = document.createElement('div');
+    strip.style.cssText = 'background:#f0f4ff;border:1px solid #c7d2fe;border-radius:8px;padding:8px 14px;font-size:0.7rem;font-weight:700;color:#3730a3;margin-bottom:20px;display:flex;align-items:center;gap:8px;';
+    strip.innerHTML = '<i class="fas fa-eye"></i> Print Preview &mdash; This is how your document will look when printed or saved as PDF.';
+    mount.innerHTML = '';
+    mount.appendChild(strip);
+    mount.appendChild(clone);
+    document.getElementById('purPrintModal').classList.add('open');
+    document.body.style.overflow = 'hidden';
+}
+
+function closePurPreview() {
+    document.getElementById('purPrintModal').classList.remove('open');
+    document.body.style.overflow = '';
+}
+
+function confirmPurPrint() {
+    closePurPreview();
+    setTimeout(() => window.print(), 80);
+}
+
+document.getElementById('purPrintModal').addEventListener('click', function(e) {
+    if (e.target === this) closePurPreview();
+});
 </script>
 {% endblock %}
 """
