@@ -43,6 +43,7 @@ TEMPLATES = {}
 class Product(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     barcode = db.Column(db.String(50), unique=True, nullable=True)
+    code_name = db.Column(db.String(50), nullable=True)
     name = db.Column(db.String(100), nullable=False)
     flavor = db.Column(db.String(100))
     type = db.Column(db.String(50))
@@ -90,6 +91,7 @@ def get_products_dict():
     return {str(p.id): {
         "id": p.id,
         "barcode": p.barcode or '',
+        "code_name": p.code_name or '',
         "name": p.name,
         "flavor": p.flavor or '',
         "type": p.type or '',
@@ -177,6 +179,7 @@ def products():
             return redirect(url_for('products'))
 
         name = request.form.get('name')
+        code_name = request.form.get('code_name', '').strip() or None
         price = float(request.form.get('price') or 0)
         cost = float(request.form.get('cost') or 0)
         discount = float(request.form.get('discount') or 0)
@@ -196,6 +199,7 @@ def products():
             if not p:
                 return redirect(url_for('products'))
             p.name, p.price, p.barcode = name, price, barcode
+            p.code_name = code_name
             p.flavor = request.form.get('flavor')
             p.type = request.form.get('type')
             p.version = request.form.get('version')
@@ -206,7 +210,8 @@ def products():
                 p.image = image_filename
         else:
             qty = int(request.form.get('quantity') or 0)
-            new_p = Product(name=name, price=price, barcode=barcode, 
+            new_p = Product(name=name, price=price, barcode=barcode,
+                            code_name=code_name,
                             qty=qty, 
                             type=request.form.get('type'), 
                             flavor=request.form.get('flavor'), 
@@ -234,9 +239,10 @@ def sales():
         if p and qty > 0 and p.qty >= qty:
             product_discount = p.discount or 0
             total_discount = product_discount + manual_discount
-            discounted_price = max(0, p.price - total_discount)
+            grand_total = max(0, (p.price * qty) - total_discount)
+            effective_unit_price = round(grand_total / qty, 4) if qty else 0
             p.qty -= qty
-            db.session.add(StockOutLog(name=p.name, flavor=p.flavor, category=p.type, qty=qty, price=discounted_price, cost=p.cost))
+            db.session.add(StockOutLog(name=p.name, flavor=p.flavor, category=p.type, qty=qty, price=effective_unit_price, cost=p.cost))
             db.session.commit()
             flash("Sale recorded successfully.", "success")
         else:
@@ -271,6 +277,63 @@ def reports():
 
     return render_template('reports.html', movement=movement, revenue=sum(l.qty*l.price for l in logs_out), sales_count=len(logs_out), date=today.strftime("%B %d, %Y"), now=datetime.now().strftime("%H:%M"), period=period, report_label="Inventory Audit Report", low_stocks=low_stocks)
 
+
+
+@app.route('/purchase_report')
+def purchase_report():
+    period = request.args.get('period', 'daily')
+    today = datetime.now().date()
+    start_date = today - timedelta(days=7) if period == 'weekly' else (today - timedelta(days=30) if period == 'monthly' else today)
+    start_date_str = start_date.strftime('%Y-%m-%d')
+
+    logs_in = StockInLog.query.filter(func.date(StockInLog.date) >= start_date_str).order_by(StockInLog.date.desc()).all()
+
+    # Summary stats
+    total_units = sum(l.qty for l in logs_in)
+    total_items = len(logs_in)
+
+    # Group by product for breakdown
+    product_breakdown = {}
+    for l in logs_in:
+        key = f"{l.name} {l.flavor or ''}".strip()
+        if key not in product_breakdown:
+            product_breakdown[key] = {'name': l.name, 'flavor': l.flavor or '', 'category': l.category or '', 'qty': 0, 'entries': 0}
+        product_breakdown[key]['qty'] += l.qty
+        product_breakdown[key]['entries'] += 1
+    product_breakdown = sorted(product_breakdown.values(), key=lambda x: x['qty'], reverse=True)
+
+    # Cost data from Product table joined by name+flavor
+    products_map = {(p.name, p.flavor or ''): p for p in Product.query.all()}
+    total_cost = 0.0
+    for item in product_breakdown:
+        p = products_map.get((item['name'], item['flavor']))
+        item['cost'] = p.cost if p else 0.0
+        item['total_cost'] = item['qty'] * item['cost']
+        total_cost += item['total_cost']
+
+    # Category breakdown
+    cat_breakdown = {}
+    for item in product_breakdown:
+        cat = item['category'] or 'Uncategorized'
+        if cat not in cat_breakdown:
+            cat_breakdown[cat] = 0
+        cat_breakdown[cat] += item['qty']
+
+    period_label = {'daily': 'Today', 'weekly': 'Last 7 Days', 'monthly': 'Last 30 Days'}[period]
+
+    return render_template('purchase_report.html',
+        logs_in=logs_in,
+        product_breakdown=product_breakdown,
+        cat_breakdown=cat_breakdown,
+        total_units=total_units,
+        total_items=total_items,
+        total_cost=total_cost,
+        date=today.strftime("%B %d, %Y"),
+        now=datetime.now().strftime("%H:%M"),
+        period=period,
+        period_label=period_label,
+        start_date=start_date.strftime("%B %d, %Y"),
+    )
 
 
 @app.route('/api/low_stock')
@@ -484,7 +547,7 @@ def settings_backup():
     from flask import Response
 
     products = [{
-        'barcode': p.barcode, 'name': p.name, 'flavor': p.flavor,
+        'barcode': p.barcode, 'code_name': p.code_name, 'name': p.name, 'flavor': p.flavor,
         'type': p.type, 'version': p.version, 'mg': p.mg,
         'qty': p.qty, 'cost': p.cost, 'price': p.price,
         'discount': p.discount, 'image': p.image,
@@ -554,7 +617,7 @@ def settings_restore():
             if mode == 'merge' and (p.get('barcode') in existing_barcodes or key in existing_names_flavors):
                 continue
             new_p = Product(
-                barcode=p.get('barcode'), name=p.get('name', ''), flavor=p.get('flavor'),
+                barcode=p.get('barcode'), code_name=p.get('code_name'), name=p.get('name', ''), flavor=p.get('flavor'),
                 type=p.get('type'), version=p.get('version'), mg=p.get('mg'),
                 qty=p.get('qty', 0), cost=p.get('cost', 0.0), price=p.get('price', 0.0),
                 discount=p.get('discount', 0.0), image=p.get('image', 'default.jpg')
@@ -1076,6 +1139,7 @@ TEMPLATES["base.html"] = """
             <li><a href="/sales" class="{{ 'active' if request.path == '/sales' }}"><i class="fa-solid fa-cart-shopping"></i> <span>Sales</span></a></li>
             <li><a href="/products" class="{{ 'active' if request.path == '/products' }}"><i class="fa-solid fa-tags"></i> <span>Products</span></a></li>
             <li><a href="/reports" class="{{ 'active' if request.path == '/reports' }}"><i class="fa-solid fa-file-waveform"></i> <span>Reports</span></a></li>
+            <li><a href="/purchase_report" class="{{ 'active' if request.path == '/purchase_report' }}"><i class="fa-solid fa-basket-shopping"></i> <span>Purchase Report</span></a></li>
             <li><a href="/analytics" class="{{ 'active' if request.path == '/analytics' }}"><i class="fa-solid fa-chart-line"></i> <span>Analytics</span></a></li>
             <li><a href="/settings" class="{{ 'active' if request.path == '/settings' }}"><i class="fa-solid fa-gear"></i> <span>Settings</span></a></li>
         </ul>
@@ -1544,11 +1608,19 @@ TEMPLATES["inventory.html"] = """
     .header-title h1 { font-size: 1.7rem; font-weight: 800; color: var(--text); margin: 0; letter-spacing: -0.5px; }
     .header-title p { color: var(--muted); margin: 4px 0 0; font-size: 0.88rem; }
 
-    .notif-bell {
-        background: white; width: 45px; height: 45px; border-radius: 50%;
-        display: flex; align-items: center; justify-content: center;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.05); color: #1a2b4b; position: relative;
+    .cat-filters {
+        display: flex; gap: 8px; flex-wrap: wrap;
     }
+    .cat-pill {
+        display: flex; align-items: center; gap: 6px;
+        background: white; border: 1.5px solid var(--border);
+        padding: 9px 18px; border-radius: 50px; font-size: 0.8rem;
+        font-weight: 700; color: var(--muted); cursor: pointer;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.04); transition: 0.2s;
+        white-space: nowrap;
+    }
+    .cat-pill:hover { border-color: #705194; color: #705194; background: var(--brand-light); }
+    .cat-pill.active { background: #705194; color: white; border-color: #705194; }
 
     /* --- LIST CARD --- */
     .list-card {
@@ -1614,8 +1686,17 @@ TEMPLATES["inventory.html"] = """
         <div class="header-title">
             <h1>Inventory</h1>
         </div>
-        <div class="notif-bell">
-            <i class="fas fa-bell"></i>
+        <div class="cat-filters">
+            <button class="cat-pill active" onclick="filterByCategory('all', this)"><i class="fas fa-border-all"></i> All</button>
+            {% set categories = [] %}
+            {% for key, p in products.items() %}
+                {% if p.type and p.type not in categories %}
+                    {% set _ = categories.append(p.type) %}
+                {% endif %}
+            {% endfor %}
+            {% for cat in categories|sort %}
+            <button class="cat-pill" onclick="filterByCategory('{{ cat|lower }}', this)">{{ cat }}</button>
+            {% endfor %}
         </div>
     </div>
 
@@ -1631,7 +1712,7 @@ TEMPLATES["inventory.html"] = """
             
             <div class="search-box">
                 <i class="fas fa-search"></i>
-                <input type="text" id="invSearch" placeholder="Search product name or flavor..." onkeyup="filterInventory()">
+                <input type="text" id="invSearch" placeholder="Search by code name, product name or flavor..." onkeyup="filterInventory()">
             </div>
         </div>
 
@@ -1640,6 +1721,7 @@ TEMPLATES["inventory.html"] = """
                 <thead>
                     <tr>
                         <th>Image</th>
+                        <th>Code</th>
                         <th>Product Name</th>
                         <th>Flavor</th>
                         <th>Category</th>
@@ -1657,6 +1739,13 @@ TEMPLATES["inventory.html"] = """
                             <div class="img-cell">
                                 <img src="{{ url_for('static', filename='uploads/' + p.image) if p.image else '' }}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" style="width:100%;height:100%;object-fit:cover;"><div style="display:none;width:100%;height:100%;align-items:center;justify-content:center;color:#cbd5e1;font-size:1.2rem;"><i class="fas fa-image"></i></div>
                             </div>
+                        </td>
+                        <td>
+                            {% if p.code_name %}
+                            <span style="background:#ede9f8;color:#705194;padding:2px 8px;border-radius:6px;font-size:0.72rem;font-weight:800;font-family:monospace;white-space:nowrap;">{{ p.code_name }}</span>
+                            {% else %}
+                            <span style="color:#cbd5e1;font-size:0.75rem;">—</span>
+                            {% endif %}
                         </td>
                         <td class="name-cell">
                             <strong>{{ p.name }}</strong>
@@ -1695,29 +1784,48 @@ TEMPLATES["inventory.html"] = """
 </div>
 
 <script>
-    function filterInventory() {
-        let input = document.getElementById("invSearch");
-        let filter = input.value.toUpperCase();
-        let table = document.getElementById("invTable");
-        let tr = table.getElementsByTagName("tr");
+    let activeCategory = 'all';
 
-        for (let i = 1; i < tr.length; i++) {
-            // Column 1 is Name, Column 2 is Flavor
-            let tdName = tr[i].getElementsByTagName("td")[1];
-            let tdFlavor = tr[i].getElementsByTagName("td")[2];
-            
-            if (tdName && tdFlavor) {
-                let nameVal = tdName.textContent || tdName.innerText;
-                let flavorVal = tdFlavor.textContent || tdFlavor.innerText;
-                
-                if (nameVal.toUpperCase().indexOf(filter) > -1 || flavorVal.toUpperCase().indexOf(filter) > -1) {
-                    tr[i].style.display = "";
-                } else {
-                    tr[i].style.display = "none";
-                }
-            }
-        }
+    function filterByCategory(cat, btn) {
+        activeCategory = cat;
+        document.querySelectorAll('.cat-pill').forEach(p => p.classList.remove('active'));
+        btn.classList.add('active');
+        applyFilters();
     }
+
+    function filterInventory() {
+        applyFilters();
+    }
+
+    function applyFilters() {
+        const searchVal = (document.getElementById("invSearch").value || '').toUpperCase();
+        const tbody = document.querySelector("#invTable tbody");
+        const rows = Array.from(tbody.querySelectorAll("tr"));
+
+        rows.forEach(row => {
+            const tds = row.getElementsByTagName("td");
+            const codeVal   = tds[1] ? (tds[1].textContent || tds[1].innerText) : '';
+            const nameVal   = tds[2] ? (tds[2].textContent || tds[2].innerText) : '';
+            const flavorVal = tds[3] ? (tds[3].textContent || tds[3].innerText) : '';
+            const catVal    = tds[4] ? (tds[4].textContent || tds[4].innerText).trim().toLowerCase() : '';
+
+            const matchesSearch = !searchVal ||
+                codeVal.toUpperCase().indexOf(searchVal) > -1 ||
+                nameVal.toUpperCase().indexOf(searchVal) > -1 ||
+                flavorVal.toUpperCase().indexOf(searchVal) > -1;
+
+            const matchesCat = activeCategory === 'all' || catVal.indexOf(activeCategory) > -1;
+
+            row.style.display = (matchesSearch && matchesCat) ? '' : 'none';
+        });
+    }
+
+    // Store original order on load
+    document.addEventListener("DOMContentLoaded", function () {
+        const tbody = document.querySelector("#invTable tbody");
+        const rows = Array.from(tbody.querySelectorAll("tr"));
+        rows.forEach((row, i) => row.dataset.origIndex = i);
+    });
 </script>
 {% endblock %}
 """
@@ -1987,6 +2095,10 @@ TEMPLATES["products.html"] = """
                             <label>Product Name / Description</label>
                             <input type="text" name="name" id="name" placeholder="Enter product name..." required>
                         </div>
+                        <div class="field">
+                            <label>Code Name <span style="color:var(--muted);font-weight:400;font-size:0.7rem;">(optional shortcut)</span></label>
+                            <input type="text" name="code_name" id="code_name" placeholder="e.g. CHILL-M, FLEX-01..." autocomplete="off">
+                        </div>
                     </div>
                 </div>
 
@@ -2032,6 +2144,7 @@ TEMPLATES["products.html"] = """
             <table class="prod-table" id="masterTable">
                 <thead>
                     <tr>
+                        <th>Code</th>
                         <th>Product Name</th>
                         <th>Stock</th>
                         <th>Price</th>
@@ -2043,6 +2156,13 @@ TEMPLATES["products.html"] = """
                 <tbody>
                     {% for key, p in products.items() %}
                     <tr>
+                        <td>
+                            {% if p.code_name %}
+                            <span style="background:var(--brand-light);color:var(--brand);padding:2px 8px;border-radius:6px;font-size:0.75rem;font-weight:800;font-family:monospace;white-space:nowrap;">{{ p.code_name }}</span>
+                            {% else %}
+                            <span style="color:var(--muted);font-size:0.75rem;">—</span>
+                            {% endif %}
+                        </td>
                         <td>
                             <strong>{{ p.name }}</strong><br>
                             <small style="color:var(--muted)">{{ p.flavor or '' }} {{ '| ' + p.mg if p.mg else '' }}</small>
@@ -2091,6 +2211,7 @@ function editProduct(key) {
     const p = productsData[key];
     document.getElementById('editing_key').value = key;
     document.getElementById('barcode').value = p.barcode || '';
+    document.getElementById('code_name').value = p.code_name || '';
     document.getElementById('name').value = p.name;
     document.getElementById('flavor').value = p.flavor || '';
     document.getElementById('type').value = p.type;
@@ -2106,6 +2227,7 @@ function resetForm() {
     document.getElementById('productForm').reset();
     document.getElementById('editing_key').value = '';
     document.getElementById('barcode').value = '';
+    document.getElementById('code_name').value = '';
     document.getElementById('qty_group').style.display = '';
     document.getElementById('imgPreview').style.display = 'none';
     document.getElementById('uploadHint').style.display = 'flex';
@@ -2853,7 +2975,7 @@ TEMPLATES["sales.html"] = """
                 <!-- Search Field -->
                 <div class="field search-wrap">
                     <label>Search Product Name</label>
-                    <input type="text" id="productSearch" placeholder="Type product name or flavor..." oninput="filterProducts()">
+                    <input type="text" id="productSearch" placeholder="Search by code name, name or flavor..." oninput="filterProducts()">
                     <input type="hidden" name="product_key" id="hiddenKey" required>
                     <div id="searchResults" class="search-results"></div>
                 </div>
@@ -3049,13 +3171,18 @@ function filterProducts() {
     // ── Normal product search ──────────────────────────────────────────────
     picker.style.display = 'none';
     const matches = Object.entries(productsData).filter(([id, p]) =>
-        p.name.toLowerCase().includes(q) || (p.flavor||'').toLowerCase().includes(q)
+        p.name.toLowerCase().includes(q) ||
+        (p.flavor||'').toLowerCase().includes(q) ||
+        (p.code_name||'').toLowerCase().includes(q)
     );
 
     div.innerHTML = matches.map(([id, p]) => `
         <div class="s-item" onclick="selectItem('${id}','${p.name} - ${p.flavor}',${p.price},${p.qty},${p.discount||0})">
-            <strong>${p.name} <span style="color:var(--brand)">${p.flavor||''}</span></strong>
-            <small>Stock: ${p.qty} | ₱${p.price.toLocaleString()}${p.discount > 0 ? ` <span style="color:#f59e0b;font-weight:700;">(₱${p.discount.toLocaleString()} OFF)</span>` : ''}</small>
+            <strong>
+                ${p.code_name ? `<span style="background:#ede9f8;color:#705194;padding:1px 7px;border-radius:5px;font-size:0.7rem;font-family:monospace;font-weight:800;margin-right:6px;">${p.code_name}</span>` : ''}
+                ${p.name} <span style="color:var(--brand)">${p.flavor||''}</span>
+            </strong>
+            <small>${p.mg ? `<span style="color:var(--muted);margin-right:6px;">${p.mg}</span> · ` : ''}Stock: ${p.qty} | ₱${p.price.toLocaleString()}${p.discount > 0 ? ` <span style="color:#f59e0b;font-weight:700;">(₱${p.discount.toLocaleString()} OFF)</span>` : ''}</small>
         </div>
     `).join('');
     div.style.display = matches.length ? 'block' : 'none';
@@ -3120,11 +3247,13 @@ function calcTotal() {
     const productDiscount = parseFloat(document.getElementById('qtyInput').dataset.productDiscount) || 0;
     const manualDiscount = parseFloat(document.getElementById('manualDiscount').value) || 0;
     const totalDiscount = productDiscount + manualDiscount;
-    const finalPrice = Math.max(0, basePrice - totalDiscount);
+    const subtotal = basePrice * qty;
+    const grandTotal = Math.max(0, subtotal - totalDiscount);
 
-    let label = `₱ ${(qty * finalPrice).toLocaleString(undefined,{minimumFractionDigits:2})}`;
+    const fmt = v => v.toLocaleString(undefined, {minimumFractionDigits:2});
+    let label = `₱ ${fmt(grandTotal)}`;
     if (totalDiscount > 0) {
-        label += ` <span style="font-size:0.75rem;color:#f59e0b;font-weight:700;">(₱${totalDiscount.toLocaleString(undefined,{minimumFractionDigits:2})} OFF)</span>`;
+        label += ` <span style="font-size:0.75rem;color:#f59e0b;font-weight:700;">(₱${fmt(subtotal)} − ₱${fmt(totalDiscount)} discount)</span>`;
     }
     document.getElementById('totalBox').innerHTML = label;
 }
@@ -3307,7 +3436,7 @@ TEMPLATES["analytics.html"] = """
                 <div class="chart-head-left">
                     <div class="chart-ico"><i class="fas fa-calendar-days"></i></div>
                     <div>
-                        <div class="chart-title">Monthly Revenue vs Profit</div>
+                        <div class="chart-title">Monthly Profit</div>
                         <div class="chart-sub">Last 6 months comparison</div>
                     </div>
                 </div>
@@ -3531,7 +3660,9 @@ function switchTrend(type, btn) {
     trendChart.data.datasets[0].label = isRev ? 'Revenue (₱)' : 'Units Sold';
     trendChart.options.plugins.tooltip.callbacks.label = ctx =>
         isRev ? ' ₱' + ctx.raw.toLocaleString() : ' ' + ctx.raw + ' units';
-    trendChart.options.scales.y.ticks.callback = v => isRev ? '₱' + v.toLocaleString() : v;
+    trendChart.options.scales.y.ticks.callback = v => isRev ? '₱' + v.toLocaleString() : (Number.isInteger(v) ? v : '');
+    trendChart.options.scales.y.ticks.stepSize = isRev ? undefined : 1;
+    trendChart.options.scales.y.ticks.precision = isRev ? undefined : 0;
     trendChart.update();
 }
 
@@ -3541,8 +3672,7 @@ new Chart(document.getElementById('monthlyChart').getContext('2d'), {
     data: {
         labels: monthlyLabels,
         datasets: [
-            { label: 'Revenue', data: monthlyRev, backgroundColor: 'rgba(112,81,148,0.8)', borderRadius: 6 },
-            { label: 'Profit',  data: monthlyProfit, backgroundColor: 'rgba(16,185,129,0.7)', borderRadius: 6 }
+            { label: 'Profit', data: monthlyProfit, backgroundColor: 'rgba(16,185,129,0.7)', borderRadius: 6 }
         ]
     },
     options: {
@@ -3646,6 +3776,11 @@ TEMPLATES["settings.html"] = """
     .section-label {
         font-size: 0.65rem; font-weight: 800; text-transform: uppercase;
         letter-spacing: 1px; color: var(--muted); margin: 22px 0 9px;
+    }
+    .section-label.section-sep {
+        margin-top: 36px;
+        padding-top: 24px;
+        border-top: 1.5px solid var(--border);
     }
 
     /* ALERT */
@@ -3786,6 +3921,42 @@ TEMPLATES["settings.html"] = """
         .stat-row { gap: 7px; }
         .stat-box { padding: 10px 4px; }
     }
+
+    /* ── SETTINGS TAB NAV ── */
+    .settings-nav {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        background: #1a1f35;
+        border-radius: var(--radius);
+        padding: 10px;
+        margin-bottom: 22px;
+    }
+    .settings-nav .nav-group-label {
+        font-size: 0.58rem; font-weight: 800; text-transform: uppercase;
+        letter-spacing: 1.2px; color: #6b7a99;
+        padding: 4px 8px 6px;
+    }
+    .settings-nav .nav-item {
+        display: flex; align-items: center; gap: 10px;
+        padding: 11px 14px; border-radius: 10px;
+        font-size: 0.88rem; font-weight: 600;
+        color: #a0aec0; cursor: pointer;
+        transition: background .15s, color .15s;
+        border: none; background: transparent; width: 100%; text-align: left;
+    }
+    .settings-nav .nav-item i {
+        font-size: 0.82rem; width: 16px; text-align: center;
+    }
+    .settings-nav .nav-item:hover { background: rgba(255,255,255,.06); color: #cbd5e0; }
+    .settings-nav .nav-item.active {
+        background: #2a3150; color: #ffffff;
+    }
+    .settings-nav .nav-item.active i { color: #7b9ef8; }
+
+    /* ── TAB PANELS ── */
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
 </style>
 
 <div class="pg">
@@ -3800,6 +3971,20 @@ TEMPLATES["settings.html"] = """
         {{ msg }}
     </div>
     {% endif %}
+
+    <!-- SETTINGS TAB NAV -->
+    <nav class="settings-nav">
+        <div class="nav-group-label">System</div>
+        <button class="nav-item active" onclick="switchTab('users', this)" id="tab-btn-users">
+            <i class="fas fa-users"></i> Users
+        </button>
+        <button class="nav-item" onclick="switchTab('backup', this)" id="tab-btn-backup">
+            <i class="fas fa-shield-halved"></i> Backup &amp; Restore
+        </button>
+    </nav>
+
+    <!-- TAB: USERS -->
+    <div class="tab-panel active" id="tab-users">
 
     <!-- SYSTEM OVERVIEW -->
     <div class="section-label">System Overview</div>
@@ -3829,23 +4014,26 @@ TEMPLATES["settings.html"] = """
             <small>Signed in as <strong>{{ admin_user }}</strong></small>
         </div>
         <div class="card-body">
-            <form method="POST">
+            <form method="POST" autocomplete="off">
                 <input type="hidden" name="action" value="change_password">
+                <!-- Dummy fields to prevent browser autofill -->
+                <input type="text" style="display:none" name="fake_user">
+                <input type="password" style="display:none" name="fake_pass">
                 <div class="field">
                     <label>Current Password</label>
                     <input type="password" name="current_password"
-                           placeholder="Enter current password" required autocomplete="current-password">
+                           placeholder="Enter current password" required autocomplete="off">
                 </div>
                 <div class="two-col">
                     <div class="field">
                         <label>New Password</label>
                         <input type="password" name="new_password"
-                               placeholder="New password" required autocomplete="new-password">
+                               placeholder="New password" required autocomplete="off">
                     </div>
                     <div class="field">
                         <label>Confirm New Password</label>
                         <input type="password" name="confirm_password"
-                               placeholder="Repeat password" required autocomplete="new-password">
+                               placeholder="Repeat password" required autocomplete="off">
                     </div>
                 </div>
                 <button type="submit" class="btn btn-primary">
@@ -3862,18 +4050,21 @@ TEMPLATES["settings.html"] = """
             <strong>Change Username</strong>
         </div>
         <div class="card-body">
-            <form method="POST">
+            <form method="POST" autocomplete="off">
                 <input type="hidden" name="action" value="change_username">
+                <!-- Dummy fields to prevent browser autofill -->
+                <input type="text" style="display:none" name="fake_user2">
+                <input type="password" style="display:none" name="fake_pass2">
                 <div class="two-col">
                     <div class="field">
                         <label>New Username</label>
                         <input type="text" name="new_username"
-                               placeholder="Enter new username" required autocomplete="username">
+                               placeholder="Enter new username" required autocomplete="off">
                     </div>
                     <div class="field">
                         <label>Confirm with Password</label>
                         <input type="password" name="password_for_user"
-                               placeholder="Current password" required autocomplete="current-password">
+                               placeholder="Current password" required autocomplete="off">
                     </div>
                 </div>
                 <button type="submit" class="btn btn-primary">
@@ -3882,6 +4073,11 @@ TEMPLATES["settings.html"] = """
             </form>
         </div>
     </div>
+
+    </div><!-- /tab-users -->
+
+    <!-- TAB: BACKUP & RESTORE -->
+    <div class="tab-panel" id="tab-backup">
 
     <!-- BACKUP & RESTORE -->
     <div class="section-label">Backup &amp; Restore</div>
@@ -3943,7 +4139,7 @@ TEMPLATES["settings.html"] = """
                 <div class="field">
                     <label>Password to confirm restore</label>
                     <input type="password" name="restore_password"
-                           placeholder="Enter your password" required autocomplete="current-password">
+                           placeholder="Enter your password" required autocomplete="off">
                 </div>
 
                 <button type="submit" class="btn btn-blue">
@@ -3953,9 +4149,20 @@ TEMPLATES["settings.html"] = """
         </div>
     </div>
 
+    </div><!-- /tab-backup -->
+
 </div>
 
 <script>
+function switchTab(tab, btn) {
+    // Hide all panels, deactivate all nav items
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.settings-nav .nav-item').forEach(b => b.classList.remove('active'));
+    // Show selected panel and mark nav item active
+    document.getElementById('tab-' + tab).classList.add('active');
+    btn.classList.add('active');
+}
+
 function updateDropLabel(input) {
     const file = input.files[0];
     if (!file) return;
@@ -3986,6 +4193,396 @@ const dz = document.getElementById('dropZone');
 {% endblock %}
 """
 
+TEMPLATES["purchase_report.html"] = """
+{% extends "base.html" %}
+
+{% block content %}
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+
+<style>
+    :root {
+        --brand:#705194; --brand-light:#f3eeff; --green:#10b981; --red:#ef4444;
+        --orange:#f59e0b; --blue:#3b82f6;
+        --grad:linear-gradient(135deg,#705194,#9b6fc4);
+        --bg:#f8f7ff;
+        --border:#e8e4f0; --text:#1e293b; --muted:#64748b;
+        --radius:16px; --radius-sm:10px;
+        --shadow:0 2px 10px rgba(112,81,148,.05);
+        --brand-navy: #162135;
+        --brand-purple: #705194;
+        --brand-green: #10b981;
+        --brand-red: #ef4444;
+        --soft-bg: #f8f7ff;
+        --border-light: #e8e4f0;
+    }
+
+    .report-ui-wrapper { max-width: 900px; margin: 0 auto; padding: 10px; }
+
+    .report-controls {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: white;
+        padding: 12px;
+        border-radius: var(--radius);
+        margin-bottom: 20px;
+        border: 1.5px solid var(--border);
+        box-shadow: var(--shadow);
+        flex-wrap: wrap;
+        gap: 12px;
+    }
+
+    .period-selector {
+        display: flex;
+        background: #f1f5f9;
+        padding: 4px;
+        border-radius: 8px;
+        flex: 1;
+        min-width: 250px;
+    }
+    .period-btn {
+        text-decoration: none;
+        padding: 8px 12px;
+        flex: 1;
+        text-align: center;
+        border-radius: 6px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: #64748b;
+        transition: 0.2s;
+    }
+    .period-btn.active { background: white; color: var(--brand); box-shadow: 0 2px 10px rgba(112,81,148,.1); font-weight:700; }
+
+    .btn-group {
+        display: flex;
+        gap: 8px;
+        flex: 1;
+        justify-content: flex-end;
+        min-width: 200px;
+    }
+    .btn-action {
+        flex: 1;
+        border: none;
+        padding: 10px;
+        border-radius: 8px;
+        font-weight: 700;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        font-size: 0.8rem;
+        color: white;
+    }
+    .btn-pdf { background: #475569; }
+    .btn-img { background: var(--brand-purple); }
+
+    #report-capture-area {
+        background: white;
+        width: 100%;
+        margin: 0 auto;
+        padding: 5vw;
+        color: var(--brand-navy);
+        font-family: 'Inter', sans-serif;
+        border: 1px solid var(--border-light);
+        position: relative;
+        box-sizing: border-box;
+    }
+
+    .doc-header {
+        text-align: center;
+        border-bottom: 2px solid var(--brand-navy);
+        padding-bottom: 20px;
+        margin-bottom: 30px;
+    }
+    .brand-info h2 { margin: 0; font-size: clamp(1.1rem, 4vw, 1.6rem); font-weight: 800; letter-spacing: 1px; }
+    .brand-info p  { margin: 5px 0 0; font-size: clamp(0.7rem, 2vw, 0.85rem); color: #64748b; text-transform: uppercase; }
+    .report-type-label { margin-top: 15px; font-size: clamp(0.9rem, 3vw, 1.1rem); font-weight: 700; color: var(--brand-purple); text-transform: uppercase; }
+    .report-date { font-size: 0.8rem; color: #94a3b8; margin-top: 5px; }
+    .report-period-badge {
+        display: inline-block;
+        margin-top: 8px;
+        padding: 3px 14px;
+        background: var(--brand-light);
+        color: var(--brand-purple);
+        border-radius: 99px;
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+    }
+
+    .report-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 15px;
+        margin-bottom: 30px;
+    }
+    .stat-card { background: var(--soft-bg); padding: 15px; border-radius: 12px; border: 1px solid var(--border-light); text-align: center; }
+    .stat-card label { display: block; font-size: 0.6rem; font-weight: 800; color: #94a3b8; text-transform: uppercase; margin-bottom: 5px; }
+    .stat-card .value { font-size: clamp(1.1rem, 4vw, 1.6rem); font-weight: 800; }
+    .stat-card .value.blue  { color: var(--blue); }
+    .stat-card .value.green { color: var(--brand-green); }
+    .stat-card .value.orange{ color: var(--orange); }
+
+    .table-responsive {
+        width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        margin-bottom: 25px;
+        border-radius: 8px;
+    }
+    .swipe-hint { display: none; font-size: 0.65rem; color: #94a3b8; margin-bottom: 5px; text-align: right; font-style: italic; }
+
+    .report-table { width: 100%; border-collapse: collapse; min-width: 520px; }
+    .report-table th { background: #f1f5f9; text-align: left; padding: 10px; font-size: 0.7rem; color: #475569; border: 1px solid var(--border-light); text-transform: uppercase; letter-spacing: 0.4px; }
+    .report-table td { padding: 10px; font-size: 0.8rem; border: 1px solid var(--border-light); vertical-align: middle; }
+    .report-table tbody tr:nth-child(even) { background: #fafafa; }
+
+    .section-heading {
+        font-size: 0.75rem; font-weight: 800; text-transform: uppercase;
+        margin-bottom: 12px; color: #475569;
+        display: flex; align-items: center; gap: 8px;
+    }
+    .section-heading::after { content: ""; flex: 1; height: 1px; background: var(--border-light); }
+
+    .cat-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 10px;
+        margin-bottom: 28px;
+    }
+    .cat-chip {
+        background: var(--soft-bg);
+        border: 1px solid var(--border-light);
+        border-radius: 10px;
+        padding: 10px 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+    .cat-chip .cat-name { font-size: 0.72rem; font-weight: 700; color: var(--muted); text-transform: capitalize; }
+    .cat-chip .cat-qty  { font-size: 1.15rem; font-weight: 800; color: var(--brand-purple); }
+
+    /* Log table */
+    .log-table { width: 100%; border-collapse: collapse; min-width: 460px; }
+    .log-table th { background: #f1f5f9; text-align: left; padding: 8px 10px; font-size: 0.68rem; color: #475569; border: 1px solid var(--border-light); text-transform: uppercase; }
+    .log-table td { padding: 8px 10px; font-size: 0.78rem; border: 1px solid var(--border-light); }
+    .log-table tbody tr:nth-child(even) { background: #fafafa; }
+
+    .qty-badge {
+        display: inline-block;
+        padding: 2px 9px;
+        background: #ecfdf5;
+        color: #065f46;
+        border-radius: 99px;
+        font-size: 0.72rem;
+        font-weight: 700;
+        border: 1px solid #a7f3d0;
+    }
+
+    .doc-footer {
+        margin-top: 30px;
+        padding-top: 15px;
+        border-top: 1px solid var(--border-light);
+        display: flex;
+        justify-content: space-between;
+        font-size: 0.6rem;
+        color: #94a3b8;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    @media (max-width: 600px) {
+        .report-ui-wrapper { padding: 5px; }
+        .report-controls { padding: 10px; border-radius: 0; margin-left: -5px; margin-right: -5px; }
+        .swipe-hint { display: block; }
+        #report-capture-area { padding: 20px 15px; border-left: none; border-right: none; }
+        .btn-group { min-width: 100%; }
+        .period-selector { min-width: 100%; }
+    }
+
+    @media print {
+        nav, .sidebar, .mobile-header, .mobile-toggle, .no-print, header, .swipe-hint { display: none !important; }
+        body { background: white; margin: 0; padding: 0; }
+        .main-content { margin-left: 0 !important; width: 100% !important; padding: 0 !important; }
+        #report-capture-area { border: none; box-shadow: none; padding: 40px; width: 100%; }
+        .table-responsive { overflow: visible !important; }
+    }
+</style>
+
+<div class="report-ui-wrapper">
+
+    <!-- Controls -->
+    <div class="report-controls no-print">
+        <div class="period-selector">
+            <a href="/purchase_report?period=daily"   class="period-btn {{ 'active' if period == 'daily' }}">Today</a>
+            <a href="/purchase_report?period=weekly"  class="period-btn {{ 'active' if period == 'weekly' }}">Last 7 Days</a>
+            <a href="/purchase_report?period=monthly" class="period-btn {{ 'active' if period == 'monthly' }}">Last 30 Days</a>
+        </div>
+
+        <div class="btn-group">
+            <button onclick="window.print()" class="btn-action btn-pdf">
+                <i class="fas fa-file-pdf"></i> PDF
+            </button>
+            <button onclick="downloadReportImage()" class="btn-action btn-img">
+                <i class="fas fa-image"></i> IMAGE
+            </button>
+        </div>
+    </div>
+
+    <!-- The Document -->
+    <div id="report-capture-area">
+
+        <!-- Header -->
+        <div class="doc-header">
+            <div class="brand-info">
+                <h2>F.L.E.X VAPE SHOP</h2>
+                <p>Inventory Management System</p>
+            </div>
+            <div class="report-type-label">Purchase Report</div>
+            <div class="report-date">Issued: {{ date }}</div>
+            <div class="report-period-badge"><i class="fas fa-calendar-alt"></i> &nbsp;{{ period_label }} &mdash; from {{ start_date }}</div>
+        </div>
+
+        <!-- KPI Summary -->
+        <div class="report-grid">
+            <div class="stat-card">
+                <label>Total Units Received</label>
+                <div class="value blue">{{ total_units }}</div>
+            </div>
+            <div class="stat-card">
+                <label>Stock-In Entries</label>
+                <div class="value orange">{{ total_items }}</div>
+            </div>
+            <div class="stat-card">
+                <label>Estimated Purchase Cost</label>
+                <div class="value green">₱{{ "{:,.2f}".format(total_cost) }}</div>
+            </div>
+        </div>
+
+        <!-- Category Breakdown -->
+        {% if cat_breakdown %}
+        <div class="section-heading">Stock-In by Category</div>
+        <div class="cat-grid" style="margin-bottom:28px;">
+            {% for cat, qty in cat_breakdown.items() %}
+            <div class="cat-chip">
+                <span class="cat-name">{{ cat }}</span>
+                <span class="cat-qty">{{ qty }} units</span>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <!-- Product Breakdown Table -->
+        <div class="section-heading">Product Purchase Breakdown</div>
+        <div class="swipe-hint">Swipe table to see more &rarr;</div>
+        <div class="table-responsive">
+            <table class="report-table">
+                <thead>
+                    <tr>
+                        <th>Product</th>
+                        <th>Flavor</th>
+                        <th>Category</th>
+                        <th style="text-align:center;">Entries</th>
+                        <th style="text-align:center;">Units In</th>
+                        <th style="text-align:right;">Unit Cost</th>
+                        <th style="text-align:right;">Total Cost</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in product_breakdown %}
+                    <tr>
+                        <td><strong>{{ item.name }}</strong></td>
+                        <td style="color:var(--muted);">{{ item.flavor or '—' }}</td>
+                        <td style="color:var(--muted);text-transform:capitalize;">{{ item.category or '—' }}</td>
+                        <td style="text-align:center;">{{ item.entries }}</td>
+                        <td style="text-align:center;">
+                            <span class="qty-badge">+{{ item.qty }}</span>
+                        </td>
+                        <td style="text-align:right;">
+                            {% if item.cost > 0 %}₱{{ "{:,.2f}".format(item.cost) }}{% else %}<span style="color:var(--muted);">—</span>{% endif %}
+                        </td>
+                        <td style="text-align:right;font-weight:700;color:var(--brand-green);">
+                            {% if item.total_cost > 0 %}₱{{ "{:,.2f}".format(item.total_cost) }}{% else %}<span style="color:var(--muted);">—</span>{% endif %}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="7" style="text-align:center;padding:2rem;color:var(--muted);">
+                            <i class="fas fa-inbox fa-2x" style="opacity:0.3;display:block;margin-bottom:8px;"></i>
+                            No stock-in records for this period.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Detailed Log -->
+        <div class="section-heading">Detailed Stock-In Log</div>
+        <div class="swipe-hint">Swipe table to see more &rarr;</div>
+        <div class="table-responsive">
+            <table class="log-table">
+                <thead>
+                    <tr>
+                        <th>Date &amp; Time</th>
+                        <th>Product</th>
+                        <th>Flavor</th>
+                        <th>Category</th>
+                        <th style="text-align:center;">Qty In</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for log in logs_in %}
+                    <tr>
+                        <td style="white-space:nowrap;color:var(--muted);font-size:0.72rem;">{{ log.date.strftime('%b %d, %Y %I:%M %p') }}</td>
+                        <td><strong>{{ log.name }}</strong></td>
+                        <td style="color:var(--muted);">{{ log.flavor or '—' }}</td>
+                        <td style="color:var(--muted);text-transform:capitalize;">{{ log.category or '—' }}</td>
+                        <td style="text-align:center;"><span class="qty-badge">+{{ log.qty }}</span></td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="5" style="text-align:center;padding:1.5rem;color:var(--muted);">No entries found.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="doc-footer">
+            <span>Auth: {{ now }}</span>
+            <span>F.L.E.X System &bull; Purchase Record</span>
+        </div>
+    </div><!-- /report-capture-area -->
+</div>
+
+<script>
+async function downloadReportImage() {
+    const reportArea = document.getElementById('report-capture-area');
+    const downloadBtn = document.querySelector('.btn-img');
+    downloadBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>...';
+    downloadBtn.disabled = true;
+    try {
+        const canvas = await html2canvas(reportArea, {
+            scale: 3, useCORS: true, backgroundColor: "#ffffff",
+        });
+        const link = document.createElement('a');
+        link.href = canvas.toDataURL("image/png", 1.0);
+        link.download = `FLEX_Purchase_Report_{{ date }}.png`;
+        link.click();
+    } catch (err) {
+        alert("Export failed.");
+    } finally {
+        downloadBtn.innerHTML = '<i class="fas fa-image"></i> IMAGE';
+        downloadBtn.disabled = false;
+    }
+}
+</script>
+{% endblock %}
+"""
+
 # --- 7. ASSIGN DICTLOADER TO JINJA WORKFLOW ---
 app.jinja_loader = DictLoader(TEMPLATES)
 
@@ -4002,6 +4599,7 @@ with app.app_context():
     try:
         with db.engine.connect() as conn:
             conn.execute(db.text("ALTER TABLE product ADD COLUMN IF NOT EXISTS discount FLOAT DEFAULT 0.0"))
+            conn.execute(db.text("ALTER TABLE product ADD COLUMN IF NOT EXISTS code_name VARCHAR(50)"))
             conn.commit()
     except Exception:
         pass  # Column already exists or DB doesn't support IF NOT EXISTS — safe to ignore
