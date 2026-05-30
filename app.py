@@ -53,6 +53,7 @@ class Product(db.Model):
     cost = db.Column(db.Float, default=0.0)
     price = db.Column(db.Float, default=0.0)
     discount = db.Column(db.Float, default=0.0)  # Discount fixed peso amount
+    is_as_is = db.Column(db.Boolean, default=False)  # As-Is condition flag
     image = db.Column(db.String(255), default='default.jpg')
     date_added = db.Column(db.DateTime, default=datetime.now)
 
@@ -101,6 +102,7 @@ def get_products_dict():
         "cost": p.cost or 0.0,
         "price": p.price or 0.0,
         "discount": p.discount or 0.0,
+        "is_as_is": p.is_as_is or False,
         "image": p.image
     } for p in products}
 
@@ -183,6 +185,7 @@ def products():
         price = float(request.form.get('price') or 0)
         cost = float(request.form.get('cost') or 0)
         discount = float(request.form.get('discount') or 0)
+        is_as_is = request.form.get('is_as_is') == 'on'
         barcode = request.form.get('barcode', '').strip() or str(int(time.time()))
         
         # Handle Image File Upload safely
@@ -206,6 +209,7 @@ def products():
             p.mg = request.form.get('mg')
             p.cost = cost
             p.discount = discount
+            p.is_as_is = is_as_is
             if image_filename:
                 p.image = image_filename
         else:
@@ -217,6 +221,7 @@ def products():
                             flavor=request.form.get('flavor'), 
                             cost=cost,
                             discount=discount,
+                            is_as_is=is_as_is,
                             version=request.form.get('version'), 
                             mg=request.form.get('mg'),
                             image=image_filename or 'default.jpg')
@@ -392,6 +397,23 @@ def purchase_report():
 def api_low_stock():
     items = Product.query.filter(Product.qty < 5).order_by(Product.qty.asc()).limit(10).all()
     return jsonify([{"name": p.name, "flavor": p.flavor or "", "qty": p.qty} for p in items])
+
+@app.route('/api/clear_as_is', methods=['POST'])
+def api_clear_as_is():
+    """Clear the as-is flag on all products that had it set — called after printing."""
+    Product.query.filter_by(is_as_is=True).update({"is_as_is": False})
+    db.session.commit()
+    return jsonify({"success": True})
+
+@app.route('/api/clear_as_is/<int:product_id>', methods=['POST'])
+def api_clear_as_is_one(product_id):
+    """Clear the as-is flag on a single product."""
+    p = db.session.get(Product, product_id)
+    if p:
+        p.is_as_is = False
+        db.session.commit()
+        return jsonify({"success": True})
+    return jsonify({"success": False}), 404
 
 @app.route('/analytics')
 def analytics():
@@ -1988,6 +2010,9 @@ TEMPLATES["inventory.html"] = """
                         </td>
                         <td class="name-cell">
                             <strong>{{ p.name }}</strong>
+                            {% if p.is_as_is %}
+                            <span style="display:inline-block;margin-left:6px;background:#fff1f2;color:#be123c;border:1.5px solid #fecdd3;padding:1px 7px;border-radius:50px;font-size:0.6rem;font-weight:800;vertical-align:middle;letter-spacing:.4px;">AS-IS</span>
+                            {% endif %}
                         </td>
                         <td class="flavor-cell">
                             {{ p.flavor or '-' }}
@@ -2112,7 +2137,9 @@ TEMPLATES["inventory.html"] = """
             const tds = row.querySelectorAll('td');
             if (tds.length < 10) return;
             const code    = tds[1]  ? tds[1].textContent.trim()  : '—';
-            const name    = tds[2]  ? tds[2].textContent.trim()  : '—';
+            const nameRaw = tds[2]  ? tds[2].textContent.trim()  : '—';
+            const isAsIs  = tds[2]  ? tds[2].querySelector('[style*="AS-IS"]') !== null : false;
+            const name    = isAsIs ? nameRaw.replace('AS-IS','').trim() : nameRaw;
             const flavor  = tds[3]  ? tds[3].textContent.trim()  : '—';
             const cat     = tds[4]  ? tds[4].textContent.trim()  : '—';
             const ver     = tds[5]  ? tds[5].textContent.trim()  : '—';
@@ -2127,10 +2154,14 @@ TEMPLATES["inventory.html"] = """
             else if (qtyNum < 5) { qtyCell='<span style="background:#fee2e2;color:#991b1b;padding:3px 10px;border-radius:50px;font-size:0.68rem;font-weight:800;">'+qtyNum+' PCS ⚠</span>'; rowBg='#fffaf0'; }
             else                 { qtyCell='<span style="background:#d1fae5;color:#065f46;padding:3px 10px;border-radius:50px;font-size:0.68rem;font-weight:800;">'+qtyNum+' PCS</span>'; }
 
+            const asIsBadge = isAsIs ? '<span style="display:inline-block;margin-left:5px;background:#fff1f2;color:#be123c;border:1px solid #fecdd3;padding:1px 6px;border-radius:50px;font-size:0.58rem;font-weight:800;">AS-IS</span>' : '';
+
+            if (isAsIs) rowBg = '#fff8f0';
+
             tableRows += `<tr style="background:${rowBg||( i%2===0 ? '#fff':'#f8f9ff' )};">
                 <td style="color:#94a3b8;font-weight:700;font-size:0.65rem;text-align:center;">${i+1}</td>
                 <td><span style="background:#ede9f8;color:#705194;padding:2px 7px;border-radius:5px;font-size:0.68rem;font-weight:800;font-family:monospace;">${code||'—'}</span></td>
-                <td style="font-weight:700;font-size:0.78rem;">${name}</td>
+                <td style="font-weight:700;font-size:0.78rem;">${name}${asIsBadge}</td>
                 <td style="color:#705194;font-weight:600;font-size:0.75rem;">${flavor||'—'}</td>
                 <td><span style="background:#e0e7ff;color:#4338ca;padding:2px 8px;border-radius:50px;font-size:0.62rem;font-weight:800;text-transform:uppercase;">${cat}</span></td>
                 <td style="font-size:0.72rem;color:#64748b;">${ver||'—'}</td>
@@ -2201,6 +2232,8 @@ TEMPLATES["inventory.html"] = """
 
     function confirmInvPrint() {
         closeInvPreview();
+        // Clear as-is flags for all tagged products — they've been printed/labeled
+        fetch('/api/clear_as_is', { method: 'POST' }).catch(() => {});
         setTimeout(() => window.print(), 80);
     }
 
@@ -2513,6 +2546,12 @@ TEMPLATES["products.html"] = """
                     
                     <div class="field"><label>Selling Price ₱</label><input type="number" step="0.01" name="price" id="price" required></div>
                     <div class="field"><label>Discount ₱</label><input type="number" step="0.01" name="discount" id="discount" min="0" placeholder="0" value="0"></div>
+                    <div class="field" style="justify-content:flex-end;">
+                        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:0.72rem;font-weight:800;text-transform:uppercase;letter-spacing:0.6px;color:var(--muted);">
+                            <input type="checkbox" name="is_as_is" id="is_as_is" style="width:16px;height:16px;accent-color:var(--brand);cursor:pointer;">
+                            As-Is <span style="font-size:0.6rem;color:var(--muted);font-weight:400;">(sold as-is)</span>
+                        </label>
+                    </div>
                 </div>
 
                 <div class="form-footer">
@@ -2542,6 +2581,7 @@ TEMPLATES["products.html"] = """
                         <th>Price</th>
                         <th>Discount</th>
                         <th>Final Price</th>
+                        <th>Condition</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -2570,6 +2610,13 @@ TEMPLATES["products.html"] = """
                         </td>
                         <td style="font-weight:800;color:var(--brand);">
                             ₱{{ "{:,.2f}".format([p.price - (p.discount or 0), 0]|max) }}
+                        </td>
+                        <td>
+                            {% if p.is_as_is %}
+                            <span style="background:#fff1f2;color:#be123c;border:1.5px solid #fecdd3;padding:3px 10px;border-radius:50px;font-size:0.68rem;font-weight:800;letter-spacing:.5px;">⚠ AS-IS</span>
+                            {% else %}
+                            <span style="color:var(--muted);font-size:0.78rem;">—</span>
+                            {% endif %}
                         </td>
                         <td>
                             <div style="display:flex;gap:5px;">
@@ -2611,6 +2658,7 @@ function editProduct(key) {
     document.getElementById('mg').value = p.mg || '';
     document.getElementById('price').value = p.price;
     document.getElementById('discount').value = p.discount || 0;
+    document.getElementById('is_as_is').checked = p.is_as_is || false;
     document.getElementById('qty_group').style.display = 'none';
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -2620,6 +2668,7 @@ function resetForm() {
     document.getElementById('editing_key').value = '';
     document.getElementById('barcode').value = '';
     document.getElementById('code_name').value = '';
+    document.getElementById('is_as_is').checked = false;
     document.getElementById('qty_group').style.display = '';
     document.getElementById('imgPreview').style.display = 'none';
     document.getElementById('uploadHint').style.display = 'flex';
@@ -5527,6 +5576,7 @@ with app.app_context():
         with db.engine.connect() as conn:
             conn.execute(db.text("ALTER TABLE product ADD COLUMN IF NOT EXISTS discount FLOAT DEFAULT 0.0"))
             conn.execute(db.text("ALTER TABLE product ADD COLUMN IF NOT EXISTS code_name VARCHAR(50)"))
+            conn.execute(db.text("ALTER TABLE product ADD COLUMN IF NOT EXISTS is_as_is BOOLEAN DEFAULT FALSE"))
             conn.commit()
     except Exception:
         pass  # Column already exists or DB doesn't support IF NOT EXISTS — safe to ignore
