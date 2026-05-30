@@ -255,27 +255,79 @@ def sales():
 def reports():
     period = request.args.get('period', 'daily')
     today = datetime.now().date()
-    start_date = today - timedelta(days=7) if period == 'weekly' else today
+    if period == 'weekly':
+        start_date = today - timedelta(days=7)
+        period_label = 'Last 7 Days'
+    elif period == 'monthly':
+        start_date = today - timedelta(days=30)
+        period_label = 'Last 30 Days'
+    else:
+        start_date = today
+        period_label = 'Today'
     start_date_str = start_date.strftime('%Y-%m-%d')
-    
+
     logs_out = StockOutLog.query.filter(func.date(StockOutLog.date) >= start_date_str).all()
-    logs_in = StockInLog.query.filter(func.date(StockInLog.date) >= start_date_str).all()
-    
+    logs_in  = StockInLog.query.filter(func.date(StockInLog.date)  >= start_date_str).all()
+
+    # Revenue & volume metrics
+    revenue     = sum(l.qty * l.price for l in logs_out)
+    cost_total  = sum(l.qty * l.cost  for l in logs_out)
+    gross_profit = revenue - cost_total
+    units_sold  = sum(l.qty for l in logs_out)
+    units_in    = sum(l.qty for l in logs_in)
+    sales_count = len(logs_out)
+    avg_txn     = revenue / sales_count if sales_count else 0
+
+    # Stock movement per product
     movement = []
     for p in Product.query.all():
-        sold = sum(l.qty for l in logs_out if l.name == p.name and l.flavor == p.flavor)
-        added = sum(l.qty for l in logs_in if l.name == p.name and l.flavor == p.flavor)
+        sold  = sum(l.qty for l in logs_out if l.name == p.name and l.flavor == p.flavor)
+        added = sum(l.qty for l in logs_in  if l.name == p.name and l.flavor == p.flavor)
         opening = p.qty + sold - added
         if opening > 0 or added > 0 or sold > 0:
-            movement.append({'name': f"{p.name} {p.flavor}", 'open': opening, 'new': added, 'sold': sold, 'end': p.qty})
+            net = added - sold
+            movement.append({
+                'name': p.name, 'flavor': p.flavor or '-',
+                'category': p.type or '-',
+                'open': opening, 'new': added, 'sold': sold,
+                'end': p.qty, 'net': net,
+                'revenue': sum(l.qty * l.price for l in logs_out if l.name == p.name and l.flavor == p.flavor)
+            })
+    movement.sort(key=lambda x: x['sold'], reverse=True)
 
-    # Critical Low Stock Warning mapping
-    low_stocks = {}
-    low_stock_items = Product.query.filter(Product.qty < 5).all()
-    if low_stock_items:
-        low_stocks["low"] = low_stock_items
+    # Top sellers
+    top_sellers = [m for m in movement if m['sold'] > 0][:5]
 
-    return render_template('reports.html', movement=movement, revenue=sum(l.qty*l.price for l in logs_out), sales_count=len(logs_out), date=today.strftime("%B %d, %Y"), now=datetime.now().strftime("%H:%M"), period=period, report_label="Inventory Audit Report", low_stocks=low_stocks)
+    # Category performance
+    cat_perf = {}
+    for m in movement:
+        cat = m['category'] or 'Other'
+        if cat not in cat_perf:
+            cat_perf[cat] = {'sold': 0, 'revenue': 0, 'in': 0}
+        cat_perf[cat]['sold']    += m['sold']
+        cat_perf[cat]['revenue'] += m['revenue']
+        cat_perf[cat]['in']      += m['new']
+    cat_perf = sorted(cat_perf.items(), key=lambda x: x[1]['revenue'], reverse=True)
+
+    # Severity-tiered low stock
+    all_products = Product.query.all()
+    out_of_stock  = [p for p in all_products if p.qty <= 0]
+    critical_stock= [p for p in all_products if 1 <= p.qty <= 2]
+    low_stock     = [p for p in all_products if 3 <= p.qty <= 4]
+    warn_count    = len(out_of_stock) + len(critical_stock) + len(low_stock)
+    low_stocks    = {'out': out_of_stock, 'critical': critical_stock, 'low': low_stock}
+
+    return render_template('reports.html',
+        movement=movement, top_sellers=top_sellers, cat_perf=cat_perf,
+        revenue=revenue, gross_profit=gross_profit, avg_txn=avg_txn,
+        sales_count=sales_count, units_sold=units_sold, units_in=units_in,
+        date=today.strftime('%B %d, %Y'),
+        start_date=start_date.strftime('%b %d'), end_date=today.strftime('%b %d, %Y'),
+        now=datetime.now().strftime('%H:%M'),
+        period=period, period_label=period_label,
+        report_label='Inventory Audit Report',
+        low_stocks=low_stocks, warn_count=warn_count
+    )
 
 
 
@@ -2575,282 +2627,557 @@ TEMPLATES["reports.html"] = """
 
 <style>
     :root {
-        --brand:#705194; --brand-light:#f3eeff; --green:#10b981; --red:#ef4444;
-        --orange:#f59e0b; --blue:#3b82f6;
+        --brand:#705194; --brand-light:#f3eeff;
+        --green:#10b981; --green-lt:#d1fae5;
+        --red:#ef4444;   --red-lt:#fee2e2;
+        --orange:#f59e0b;--orange-lt:#fef3c7;
+        --blue:#3b82f6;  --blue-lt:#dbeafe;
         --grad:linear-gradient(135deg,#705194,#9b6fc4);
-        --bg:#f8f7ff;
-        --border:#e8e4f0; --text:#1e293b; --muted:#64748b;
+        --bg:#f8f7ff; --border:#e8e4f0; --text:#1e293b; --muted:#64748b;
         --radius:16px; --radius-sm:10px;
-        --shadow:0 2px 10px rgba(112,81,148,.05);
-        /* legacy aliases */
-        --brand-navy: #162135;
-        --brand-purple: #705194;
-        --brand-green: #10b981;
-        --brand-red: #ef4444;
-        --soft-bg: #f8f7ff;
-        --border-light: #e8e4f0;
+        --shadow:0 2px 12px rgba(112,81,148,.08);
+        --brand-navy:#162135; --brand-purple:#705194;
+        --brand-green:#10b981; --brand-red:#ef4444;
+        --soft-bg:#f8f7ff; --border-light:#e8e4f0;
     }
 
-    /* --- PAGE UI WRAPPER --- */
-    .report-ui-wrapper { max-width: 900px; margin: 0 auto; padding: 10px; }
+    /* ===== PAGE WRAPPER ===== */
+    .report-ui-wrapper { max-width: 1050px; margin: 0 auto; padding: 10px; }
 
-    /* --- RESPONSIVE CONTROLS --- */
+    /* ===== CONTROL BAR ===== */
     .report-controls {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        background: white;
-        padding: 12px;
-        border-radius: var(--radius);
-        margin-bottom: 20px;
-        border: 1.5px solid var(--border);
-        box-shadow: var(--shadow);
-        flex-wrap: wrap; 
-        gap: 12px;
+        display: flex; justify-content: space-between; align-items: center;
+        background: white; padding: 12px 16px;
+        border-radius: var(--radius); margin-bottom: 20px;
+        border: 1.5px solid var(--border); box-shadow: var(--shadow);
+        flex-wrap: wrap; gap: 12px;
     }
+    .period-selector {
+        display: flex; background: #f1f5f9; padding: 4px;
+        border-radius: 10px; gap: 2px;
+    }
+    .period-btn {
+        text-decoration: none; padding: 8px 16px;
+        border-radius: 8px; font-size: 0.78rem; font-weight: 600;
+        color: #64748b; transition: all .2s; white-space: nowrap;
+    }
+    .period-btn.active {
+        background: white; color: var(--brand); font-weight: 800;
+        box-shadow: 0 2px 8px rgba(112,81,148,.15);
+    }
+    .btn-group { display: flex; gap: 8px; align-items: center; }
+    .btn-action {
+        border: none; padding: 9px 14px; border-radius: 9px;
+        font-weight: 700; cursor: pointer; display: flex; align-items: center;
+        gap: 6px; font-size: 0.78rem; color: white; transition: filter .2s;
+        white-space: nowrap;
+    }
+    .btn-action:hover { filter: brightness(1.12); }
+    .btn-pdf  { background: #475569; }
+    .btn-img  { background: var(--brand); }
+    .btn-csv  { background: #059669; }
 
-    .period-selector { 
-        display: flex; 
-        background: #f1f5f9; 
-        padding: 4px; 
-        border-radius: 8px; 
-        flex: 1; 
-        min-width: 200px; 
-    }
-    .period-btn { 
-        text-decoration: none; 
-        padding: 8px 12px; 
-        flex: 1; 
-        text-align: center; 
-        border-radius: 6px; 
-        font-size: 0.8rem; 
-        font-weight: 600; 
-        color: #64748b; 
-        transition: 0.2s; 
-    }
-    .period-btn.active { background: white; color: var(--brand); box-shadow: 0 2px 10px rgba(112,81,148,.1); font-weight:700; }
-
-    .btn-group { 
-        display: flex; 
-        gap: 8px; 
-        flex: 1; 
-        justify-content: flex-end; 
-        min-width: 200px; 
-    }
-    .btn-action { 
-        flex: 1; 
-        border: none; 
-        padding: 10px; 
-        border-radius: 8px; 
-        font-weight: 700; 
-        cursor: pointer; 
-        display: flex; 
-        align-items: center; 
-        justify-content: center; 
-        gap: 6px; 
-        font-size: 0.8rem; 
-        color: white; 
-    }
-    .btn-pdf { background: #475569; }
-    .btn-img { background: var(--brand-purple); }
-
-    /* --- THE OFFICIAL REPORT DOCUMENT --- */
+    /* ===== REPORT DOCUMENT ===== */
     #report-capture-area {
-        background: white;
-        width: 100%;
-        margin: 0 auto;
-        padding: 5vw; /* Fluid padding based on screen width */
-        color: var(--brand-navy);
-        font-family: 'Inter', sans-serif;
-        border: 1px solid var(--border-light);
-        position: relative;
+        background: white; width: 100%; margin: 0 auto;
+        padding: 36px 40px; color: var(--brand-navy);
+        font-family: 'Inter', 'Outfit', sans-serif;
+        border: 1.5px solid var(--border-light);
+        border-radius: 18px;
+        box-shadow: 0 4px 24px rgba(112,81,148,.07);
         box-sizing: border-box;
     }
 
-    /* CENTERED LOGO HEADER */
+    /* ===== DOCUMENT HEADER ===== */
     .doc-header {
-        text-align: center;
+        display: flex; justify-content: space-between; align-items: flex-start;
         border-bottom: 2px solid var(--brand-navy);
-        padding-bottom: 20px;
-        margin-bottom: 30px;
+        padding-bottom: 22px; margin-bottom: 28px; flex-wrap: wrap; gap: 12px;
+    }
+    .brand-block {}
+    .brand-info h2 { margin:0; font-size:1.5rem; font-weight:900; letter-spacing:.5px; }
+    .brand-info p  { margin:4px 0 0; font-size:0.72rem; color:#64748b; text-transform:uppercase; letter-spacing:.5px; }
+    .report-meta { text-align:right; }
+    .report-type-label {
+        font-size:0.78rem; font-weight:800; color:var(--brand-purple);
+        text-transform:uppercase; letter-spacing:.8px;
+    }
+    .report-date   { font-size:0.72rem; color:#94a3b8; margin-top:4px; }
+    .report-period-badge {
+        display:inline-flex; align-items:center; gap:6px;
+        background:var(--brand-light); color:var(--brand-purple);
+        border:1px solid #d4b8f0; padding:4px 12px; border-radius:50px;
+        font-size:0.68rem; font-weight:800; margin-top:8px;
+        text-transform:uppercase; letter-spacing:.4px;
     }
 
-    .brand-info h2 { margin: 0; font-size: clamp(1.1rem, 4vw, 1.6rem); font-weight: 800; letter-spacing: 1px; }
-    .brand-info p { margin: 5px 0 0; font-size: clamp(0.7rem, 2vw, 0.85rem); color: #64748b; text-transform: uppercase; }
-    .report-type-label { margin-top: 15px; font-size: clamp(0.9rem, 3vw, 1.1rem); font-weight: 700; color: var(--brand-purple); text-transform: uppercase; }
-    .report-date { font-size: 0.8rem; color: #94a3b8; margin-top: 5px; }
-
-    /* Highlights Section */
-    .report-grid { 
-        display: grid; 
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); 
-        gap: 15px; 
-        margin-bottom: 30px; 
+    /* ===== KPI STAT CARDS ===== */
+    .report-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 14px; margin-bottom: 32px;
     }
-    .stat-card { background: var(--soft-bg); padding: 15px; border-radius: 12px; border: 1px solid var(--border-light); text-align: center;}
-    .stat-card label { display: block; font-size: 0.6rem; font-weight: 800; color: #94a3b8; text-transform: uppercase; margin-bottom: 5px; }
-    .stat-card .value { font-size: clamp(1.1rem, 4vw, 1.6rem); font-weight: 800; }
-    .stat-card .value.green { color: var(--brand-green); }
+    .stat-card {
+        background: var(--soft-bg); padding: 16px 18px;
+        border-radius: 14px; border: 1.5px solid var(--border-light);
+        position: relative; overflow: hidden;
+    }
+    .stat-card::before {
+        content:''; position:absolute; top:0; left:0; right:0; height:3px;
+        background: var(--card-accent, var(--brand));
+    }
+    .stat-card label {
+        display:block; font-size:0.58rem; font-weight:800; color:#94a3b8;
+        text-transform:uppercase; letter-spacing:.6px; margin-bottom:6px;
+    }
+    .stat-card .value { font-size:1.45rem; font-weight:900; line-height:1.1; }
+    .stat-card .value.green  { color:var(--brand-green); }
+    .stat-card .value.purple { color:var(--brand-purple); }
+    .stat-card .value.orange { color:var(--orange); }
+    .stat-card .value.red    { color:var(--brand-red); }
+    .stat-card .value.blue   { color:var(--blue); }
+    .stat-card .sub { font-size:0.65rem; color:var(--muted); margin-top:4px; }
 
-    /* Movement Table */
+    /* ===== SECTION HEADINGS ===== */
+    .section-heading {
+        font-size:0.7rem; font-weight:900; text-transform:uppercase; letter-spacing:.7px;
+        color:#475569; display:flex; align-items:center; gap:10px;
+        margin-bottom:14px; margin-top:28px;
+    }
+    .section-heading:first-of-type { margin-top: 0; }
+    .section-heading::after { content:''; flex:1; height:1px; background:var(--border-light); }
+    .section-heading i { color:var(--brand); font-size:0.8rem; }
+
+    /* ===== STOCK MOVEMENT TABLE ===== */
     .table-responsive {
-        width: 100%;
-        overflow-x: auto; 
-        -webkit-overflow-scrolling: touch;
-        margin-bottom: 25px;
-        border-radius: 8px;
+        width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch;
+        border-radius:10px; border:1px solid var(--border-light);
+        margin-bottom: 6px;
     }
-    
-    /* Swipe Hint for Mobile */
-    .swipe-hint { display: none; font-size: 0.65rem; color: #94a3b8; margin-bottom: 5px; text-align: right; font-style: italic; }
+    .report-table {
+        width:100%; border-collapse:collapse; min-width:560px;
+    }
+    .report-table thead tr { background: #f8fafc; }
+    .report-table th {
+        text-align:left; padding:11px 14px; font-size:0.62rem;
+        font-weight:800; color:#64748b; text-transform:uppercase;
+        letter-spacing:.5px; border-bottom:2px solid var(--border-light);
+        white-space:nowrap;
+    }
+    .report-table td {
+        padding:11px 14px; font-size:0.8rem;
+        border-bottom:1px solid #f1f5f9; vertical-align:middle;
+    }
+    .report-table tbody tr:last-child td { border-bottom: none; }
+    .report-table tbody tr:hover { background: #fafbff; }
+    .report-table tbody tr.row-positive td { background: rgba(16,185,129,.04); }
+    .report-table tbody tr.row-negative td { background: rgba(239,68,68,.04); }
+    .report-table tbody tr.row-neutral  td { background: rgba(100,116,139,.03); }
 
-    .report-table { width: 100%; border-collapse: collapse; min-width: 500px; }
-    .report-table th { background: #f1f5f9; text-align: left; padding: 10px; font-size: 0.7rem; color: #475569; border: 1px solid var(--border-light); }
-    .report-table td { padding: 10px; font-size: 0.8rem; border: 1px solid var(--border-light); }
+    /* net change badge */
+    .net-badge {
+        display:inline-flex; align-items:center; gap:3px;
+        padding:3px 9px; border-radius:50px; font-size:0.68rem; font-weight:800;
+    }
+    .net-pos { background:var(--green-lt); color:#065f46; }
+    .net-neg { background:var(--red-lt);   color:#991b1b; }
+    .net-zero{ background:#f1f5f9;         color:#64748b; }
 
-    /* Alerts */
-    .section-heading { font-size: 0.75rem; font-weight: 800; text-transform: uppercase; margin-bottom: 12px; color: #475569; display: flex; align-items: center; gap: 8px;}
-    .section-heading::after { content: ""; flex: 1; height: 1px; background: var(--border-light); }
-    .warning-box { background: #fff1f2; border: 1px solid #ffe4e6; border-radius: 12px; padding: 12px; }
-    .warning-item { font-size: 0.75rem; font-weight: 600; color: #991b1b; display: flex; justify-content: space-between; padding: 4px 0; }
-
-    .doc-footer { margin-top: 30px; padding-top: 15px; border-top: 1px solid var(--border-light); display: flex; justify-content: space-between; font-size: 0.6rem; color: #94a3b8; flex-wrap: wrap; gap: 8px; }
-
-    /* --- MOBILE BREAKPOINT --- */
-    @media (max-width: 600px) {
-        .report-ui-wrapper { padding: 5px; }
-        .report-controls { padding: 10px; border-radius: 0; margin-left: -5px; margin-right: -5px; }
-        .swipe-hint { display: block; }
-        #report-capture-area { padding: 20px 15px; border-left: none; border-right: none; }
-        .btn-group { min-width: 100%; }
-        .period-selector { min-width: 100%; }
+    /* category badge in movement table */
+    .cat-chip-sm {
+        background:#e0e7ff; color:#4338ca;
+        padding:2px 8px; border-radius:50px;
+        font-size:0.58rem; font-weight:800; text-transform:uppercase;
     }
 
-    /* --- PRINT FIXES --- */
+    /* revenue cell */
+    .rev-cell { font-weight:700; color:var(--brand-green); font-size:0.78rem; }
+
+    /* ===== TOP SELLERS ===== */
+    .sellers-grid {
+        display:grid; gap:10px; margin-bottom:6px;
+    }
+    .seller-row {
+        display:flex; align-items:center; gap:12px;
+        background:var(--soft-bg); padding:10px 14px;
+        border-radius:10px; border:1px solid var(--border-light);
+    }
+    .seller-rank {
+        width:24px; height:24px; border-radius:50%; background:var(--grad);
+        color:white; font-size:0.65rem; font-weight:900;
+        display:flex; align-items:center; justify-content:center; flex-shrink:0;
+    }
+    .seller-name { flex:1; font-weight:700; font-size:0.8rem; }
+    .seller-flavor { font-size:0.72rem; color:var(--muted); }
+    .seller-bar-wrap { width:100px; background:#e2e8f0; border-radius:50px; height:6px; overflow:hidden; flex-shrink:0; }
+    .seller-bar { height:100%; background:var(--grad); border-radius:50px; }
+    .seller-qty { font-size:0.72rem; font-weight:800; color:var(--brand); min-width:36px; text-align:right; }
+
+    /* ===== CATEGORY PERFORMANCE ===== */
+    .cat-perf-grid {
+        display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px;
+        margin-bottom:6px;
+    }
+    .cat-perf-card {
+        background:var(--soft-bg); border:1.5px solid var(--border-light);
+        border-radius:12px; padding:14px; text-align:center;
+    }
+    .cat-perf-name {
+        font-size:0.62rem; font-weight:900; text-transform:uppercase;
+        letter-spacing:.5px; color:var(--brand-purple); margin-bottom:8px;
+    }
+    .cat-perf-rev  { font-size:1.1rem; font-weight:900; color:var(--brand-green); }
+    .cat-perf-sold { font-size:0.7rem; color:var(--muted); margin-top:3px; }
+
+    /* ===== CRITICAL STOCK WARNINGS ===== */
+    .warn-table-wrap {
+        border-radius:12px; overflow:hidden;
+        border:1.5px solid #ffe4e6; margin-bottom:6px;
+    }
+    .warn-table {
+        width:100%; border-collapse:collapse; min-width:420px;
+    }
+    .warn-table thead tr { background:#fff1f2; }
+    .warn-table th {
+        padding:10px 14px; font-size:0.6rem; font-weight:900;
+        text-transform:uppercase; letter-spacing:.5px; color:#991b1b;
+        border-bottom:1px solid #ffe4e6; text-align:left;
+    }
+    .warn-table td {
+        padding:10px 14px; font-size:0.78rem;
+        border-bottom:1px solid #fff5f5; vertical-align:middle;
+    }
+    .warn-table tbody tr:last-child td { border-bottom:none; }
+    .warn-table tbody tr:hover { background:#fff8f8; }
+
+    .sev-badge {
+        display:inline-flex; align-items:center; gap:4px;
+        padding:3px 10px; border-radius:50px; font-size:0.62rem; font-weight:900;
+        white-space:nowrap;
+    }
+    .sev-out      { background:#fee2e2; color:#7f1d1d; }
+    .sev-critical { background:#ffedd5; color:#7c2d12; }
+    .sev-low      { background:#fef9c3; color:#713f12; }
+
+    .stock-num {
+        font-size:1rem; font-weight:900;
+        font-variant-numeric:tabular-nums;
+    }
+    .stock-num.out      { color:#b91c1c; }
+    .stock-num.critical { color:#c2410c; }
+    .stock-num.low      { color:#a16207; }
+
+    .no-warn-msg {
+        background:#f0fdf4; border:1px solid #bbf7d0; border-radius:12px;
+        padding:20px; text-align:center; color:#166534;
+        font-size:0.82rem; font-weight:700;
+    }
+    .no-warn-msg i { font-size:1.4rem; display:block; margin-bottom:6px; opacity:.7; }
+
+    /* ===== FOOTER ===== */
+    .doc-footer {
+        margin-top:32px; padding-top:16px; border-top:1px solid var(--border-light);
+        display:flex; justify-content:space-between; align-items:center;
+        font-size:0.6rem; color:#94a3b8; flex-wrap:wrap; gap:8px;
+    }
+    .doc-footer strong { color:var(--brand-navy); }
+
+    /* ===== SWIPE HINT ===== */
+    .swipe-hint { display:none; font-size:0.62rem; color:#94a3b8; margin-bottom:5px; text-align:right; font-style:italic; }
+
+    /* ===== MOBILE ===== */
+    @media (max-width:640px) {
+        .report-ui-wrapper { padding:5px; }
+        .report-controls { padding:10px; border-radius:0; margin:-5px -5px 16px; }
+        .swipe-hint { display:block; }
+        #report-capture-area { padding:20px 14px; border-left:none; border-right:none; border-radius:0; }
+        .btn-group { flex-wrap:wrap; }
+        .doc-header { flex-direction:column; }
+        .report-meta { text-align:left; }
+    }
+
+    /* ===== PRINT ===== */
     @media print {
-        nav, .sidebar, .mobile-header, .mobile-toggle, .no-print, header, .swipe-hint { display: none !important; }
-        body { background: white; margin: 0; padding: 0; }
-        .main-content { margin-left: 0 !important; width: 100% !important; padding: 0 !important; }
-        #report-capture-area { border: none; box-shadow: none; padding: 40px; width: 100%; }
-        .table-responsive { overflow: visible !important; }
+        nav,.sidebar,.mobile-header,.mobile-toggle,.no-print,.swipe-hint { display:none !important; }
+        body { background:white; margin:0; padding:0; }
+        .main-content { margin-left:0 !important; width:100% !important; padding:0 !important; }
+        #report-capture-area { border:none; box-shadow:none; padding:40px; border-radius:0; }
+        .table-responsive { overflow:visible !important; }
+        .warn-table-wrap { overflow:visible !important; }
     }
 </style>
 
 <div class="report-ui-wrapper">
-    
-    <!-- Controls -->
+
+    <!-- ── CONTROL BAR ── -->
     <div class="report-controls no-print">
         <div class="period-selector">
-            <a href="/reports?period=daily" class="period-btn {{ 'active' if period == 'daily' }}">Daily Audit</a>
-            <a href="/reports?period=weekly" class="period-btn {{ 'active' if period == 'weekly' }}">Weekly Audit</a>
+            <a href="/reports?period=daily"   class="period-btn {{ 'active' if period == 'daily' }}"><i class="fas fa-calendar-day"></i> Daily</a>
+            <a href="/reports?period=weekly"  class="period-btn {{ 'active' if period == 'weekly' }}"><i class="fas fa-calendar-week"></i> Weekly</a>
+            <a href="/reports?period=monthly" class="period-btn {{ 'active' if period == 'monthly' }}"><i class="fas fa-calendar-alt"></i> Monthly</a>
         </div>
-
         <div class="btn-group">
+            <button onclick="exportCSV()" class="btn-action btn-csv">
+                <i class="fas fa-file-csv"></i> CSV
+            </button>
             <button onclick="window.print()" class="btn-action btn-pdf">
                 <i class="fas fa-file-pdf"></i> PDF
             </button>
             <button onclick="downloadReportImage()" class="btn-action btn-img">
-                <i class="fas fa-image"></i> IMAGE
+                <i class="fas fa-image"></i> Image
             </button>
         </div>
     </div>
 
-    <!-- The Document -->
+    <!-- ── REPORT DOCUMENT ── -->
     <div id="report-capture-area">
+
+        <!-- Header -->
         <div class="doc-header">
-            <div class="brand-info">
-                <h2>F.L.E.X VAPE SHOP</h2>
-                <p>Inventory Management System</p>
+            <div class="brand-block">
+                <div class="brand-info">
+                    <h2>F.L.E.X VAPE SHOP</h2>
+                    <p>Inventory Management System</p>
+                </div>
             </div>
-            
-            <div class="report-type-label">{{ report_label }}</div>
-            <div class="report-date">Issued: {{ date }}</div>
+            <div class="report-meta">
+                <div class="report-type-label">{{ report_label }}</div>
+                <div class="report-date">Issued: {{ date }} &bull; {{ now }}</div>
+                <div class="report-period-badge"><i class="fas fa-calendar-alt"></i> {{ period_label }} &mdash; {{ start_date }} to {{ end_date }}</div>
+            </div>
         </div>
 
+        <!-- KPI Cards -->
         <div class="report-grid">
-            <div class="stat-card">
-                <label>Gross Revenue</label>
-                <div class="value green">₱{{ "{:,.2f}".format(revenue) }}</div>
+            <div class="stat-card" style="--card-accent:#10b981;">
+                <label><i class="fas fa-peso-sign"></i> Gross Revenue</label>
+                <div class="value green">&#8369;{{ "{:,.2f}".format(revenue) }}</div>
+                <div class="sub">{{ period_label }}</div>
             </div>
-            <div class="stat-card">
-                <label>Sales Volume</label>
-                <div class="value">{{ sales_count }} Sales</div>
+            <div class="stat-card" style="--card-accent:#705194;">
+                <label><i class="fas fa-receipt"></i> Transactions</label>
+                <div class="value purple">{{ sales_count }}</div>
+                <div class="sub">Avg &#8369;{{ "{:,.0f}".format(avg_txn) }} / txn</div>
+            </div>
+            <div class="stat-card" style="--card-accent:#3b82f6;">
+                <label><i class="fas fa-boxes-stacked"></i> Units Sold</label>
+                <div class="value blue">{{ units_sold }}</div>
+                <div class="sub">{{ units_in }} units restocked</div>
+            </div>
+            <div class="stat-card" style="--card-accent:{% if warn_count > 0 %}#ef4444{% else %}#10b981{% endif %};">
+                <label><i class="fas fa-triangle-exclamation"></i> Stock Alerts</label>
+                <div class="value {% if warn_count > 0 %}red{% else %}green{% endif %}">{{ warn_count }}</div>
+                <div class="sub">{% if warn_count == 0 %}All levels healthy{% else %}Items need attention{% endif %}</div>
             </div>
         </div>
 
-        <div class="section-heading">Stock Movement Summary</div>
-        <div class="swipe-hint">Swipe table to see more &rarr;</div>
+        <!-- Stock Movement Summary -->
+        <div class="section-heading"><i class="fas fa-arrow-right-arrow-left"></i> Stock Movement Summary</div>
+        <div class="swipe-hint">Swipe to see more &rarr;</div>
         <div class="table-responsive">
-            <table class="report-table">
+            <table class="report-table" id="movementTable">
                 <thead>
                     <tr>
-                        <th>Product & Flavor</th>
-                        <th style="text-align:center;">Open</th>
-                        <th style="text-align:center;">In</th>
-                        <th style="text-align:center;">Out</th>
-                        <th style="text-align:center;">End</th>
+                        <th>#</th>
+                        <th>Product</th>
+                        <th>Flavor</th>
+                        <th>Category</th>
+                        <th style="text-align:center;">Opening</th>
+                        <th style="text-align:center;">Stock In</th>
+                        <th style="text-align:center;">Stock Out</th>
+                        <th style="text-align:center;">Net</th>
+                        <th style="text-align:center;">Closing</th>
+                        <th style="text-align:right;">Revenue</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for item in movement %}
+                    {% set row_class = 'row-positive' if item.net > 0 else ('row-negative' if item.net < 0 else 'row-neutral') %}
+                    <tr class="{{ row_class }}">
+                        <td style="color:#94a3b8;font-size:0.7rem;font-weight:700;">{{ loop.index }}</td>
+                        <td><strong style="font-size:0.82rem;">{{ item.name }}</strong></td>
+                        <td style="color:var(--brand-purple);font-weight:600;font-size:0.78rem;">{{ item.flavor }}</td>
+                        <td><span class="cat-chip-sm">{{ item.category }}</span></td>
+                        <td style="text-align:center;color:#64748b;">{{ item.open }}</td>
+                        <td style="text-align:center;color:var(--brand-green);font-weight:700;">{% if item.new > 0 %}+{{ item.new }}{% else %}&mdash;{% endif %}</td>
+                        <td style="text-align:center;color:var(--brand-red);font-weight:700;">{% if item.sold > 0 %}-{{ item.sold }}{% else %}&mdash;{% endif %}</td>
+                        <td style="text-align:center;">
+                            <span class="net-badge {% if item.net > 0 %}net-pos{% elif item.net < 0 %}net-neg{% else %}net-zero{% endif %}">
+                                {% if item.net > 0 %}<i class="fas fa-arrow-up" style="font-size:.55rem;"></i> +{{ item.net }}
+                                {% elif item.net < 0 %}<i class="fas fa-arrow-down" style="font-size:.55rem;"></i> {{ item.net }}
+                                {% else %}&mdash;{% endif %}
+                            </span>
+                        </td>
+                        <td style="text-align:center;font-weight:800;font-size:0.85rem;">{{ item.end }}</td>
+                        <td style="text-align:right;" class="rev-cell">{% if item.revenue > 0 %}&#8369;{{ "{:,.2f}".format(item.revenue) }}{% else %}&mdash;{% endif %}</td>
+                    </tr>
+                    {% else %}
                     <tr>
-                        <td><strong>{{ item.name }}</strong></td>
-                        <td style="text-align:center;">{{ item.open }}</td>
-                        <td style="text-align:center; color: var(--brand-green); font-weight: 700;">+{{ item.new }}</td>
-                        <td style="text-align:center; color: var(--brand-red); font-weight: 700;">-{{ item.sold }}</td>
-                        <td style="text-align:center; font-weight: 700;">{{ item.end }}</td>
+                        <td colspan="10" style="text-align:center;padding:2rem;color:#94a3b8;">
+                            <i class="fas fa-inbox fa-2x" style="opacity:.3;display:block;margin-bottom:8px;"></i>
+                            No stock movement recorded for this period.
+                        </td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
+        <p style="font-size:0.62rem;color:#94a3b8;text-align:right;margin:4px 0 0;">* Sorted by units sold descending &bull; Green rows = net stock gain &bull; Red rows = net stock decrease</p>
 
-        {% if low_stocks %}
-        <div class="section-heading" style="color: var(--brand-red);">Critical Stock Warnings</div>
-        <div class="warning-box">
-            {% for cat, items in low_stocks.items() %}
-                {% for item in items %}
-                <div class="warning-item">
-                    <span>{{ item.name }} ({{ item.flavor }})</span>
-                    <span>{{ item.qty }} UNITS LEFT</span>
+        <!-- Top Sellers -->
+        {% if top_sellers %}
+        <div class="section-heading" style="margin-top:28px;"><i class="fas fa-fire"></i> Top Sellers</div>
+        {% set max_sold = top_sellers[0].sold %}
+        <div class="sellers-grid">
+            {% for s in top_sellers %}
+            <div class="seller-row">
+                <div class="seller-rank">{{ loop.index }}</div>
+                <div style="flex:1;min-width:0;">
+                    <div class="seller-name">{{ s.name }}</div>
+                    <div class="seller-flavor">{{ s.flavor }}</div>
                 </div>
-                {% endfor %}
+                <div class="seller-bar-wrap">
+                    <div class="seller-bar" style="width:{{ ((s.sold / max_sold) * 100)|int }}%;"></div>
+                </div>
+                <div class="seller-qty">{{ s.sold }} sold</div>
+                <div style="font-size:0.72rem;color:var(--brand-green);font-weight:700;min-width:72px;text-align:right;">&#8369;{{ "{:,.0f}".format(s.revenue) }}</div>
+            </div>
             {% endfor %}
         </div>
         {% endif %}
 
-        <div class="doc-footer">
-            <span>Auth: {{ now }}</span>
-            <span>F.L.E.X System &bull; Inventory Record</span>
+        <!-- Category Performance -->
+        {% if cat_perf %}
+        <div class="section-heading" style="margin-top:28px;"><i class="fas fa-chart-pie"></i> Category Performance</div>
+        <div class="cat-perf-grid">
+            {% for cat, stats in cat_perf %}
+            <div class="cat-perf-card">
+                <div class="cat-perf-name">{{ cat }}</div>
+                <div class="cat-perf-rev">&#8369;{{ "{:,.0f}".format(stats.revenue) }}</div>
+                <div class="cat-perf-sold">{{ stats.sold }} sold &bull; {{ stats.in }} restocked</div>
+            </div>
+            {% endfor %}
         </div>
-    </div>
+        {% endif %}
+
+        <!-- Critical Stock Warnings -->
+        <div class="section-heading" style="margin-top:28px;color:{% if warn_count > 0 %}var(--brand-red){% else %}var(--brand-green){% endif %};">
+            <i class="fas fa-{% if warn_count > 0 %}triangle-exclamation{% else %}shield-halved{% endif %}"></i>
+            Critical Stock Warnings
+        </div>
+
+        {% if warn_count > 0 %}
+        <div class="table-responsive warn-table-wrap">
+            <table class="warn-table" id="warnTable">
+                <thead>
+                    <tr>
+                        <th>Product</th>
+                        <th>Flavor</th>
+                        <th>Category</th>
+                        <th>Code</th>
+                        <th style="text-align:center;">Stock</th>
+                        <th style="text-align:center;">Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in low_stocks.out %}
+                    <tr>
+                        <td><strong>{{ item.name }}</strong></td>
+                        <td style="color:var(--muted);font-size:0.75rem;">{{ item.flavor or '—' }}</td>
+                        <td style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;">{{ item.type or '—' }}</td>
+                        <td><span style="background:#ede9f8;color:#705194;padding:2px 6px;border-radius:5px;font-size:0.62rem;font-weight:800;font-family:monospace;">{{ item.code_name or '—' }}</span></td>
+                        <td style="text-align:center;"><span class="stock-num out">0</span></td>
+                        <td style="text-align:center;"><span class="sev-badge sev-out"><i class="fas fa-circle-xmark" style="font-size:.7rem;"></i> Out of Stock</span></td>
+                    </tr>
+                    {% endfor %}
+                    {% for item in low_stocks.critical %}
+                    <tr>
+                        <td><strong>{{ item.name }}</strong></td>
+                        <td style="color:var(--muted);font-size:0.75rem;">{{ item.flavor or '—' }}</td>
+                        <td style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;">{{ item.type or '—' }}</td>
+                        <td><span style="background:#ede9f8;color:#705194;padding:2px 6px;border-radius:5px;font-size:0.62rem;font-weight:800;font-family:monospace;">{{ item.code_name or '—' }}</span></td>
+                        <td style="text-align:center;"><span class="stock-num critical">{{ item.qty }}</span></td>
+                        <td style="text-align:center;"><span class="sev-badge sev-critical"><i class="fas fa-triangle-exclamation" style="font-size:.7rem;"></i> Critical</span></td>
+                    </tr>
+                    {% endfor %}
+                    {% for item in low_stocks.low %}
+                    <tr>
+                        <td><strong>{{ item.name }}</strong></td>
+                        <td style="color:var(--muted);font-size:0.75rem;">{{ item.flavor or '—' }}</td>
+                        <td style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;">{{ item.type or '—' }}</td>
+                        <td><span style="background:#ede9f8;color:#705194;padding:2px 6px;border-radius:5px;font-size:0.62rem;font-weight:800;font-family:monospace;">{{ item.code_name or '—' }}</span></td>
+                        <td style="text-align:center;"><span class="stock-num low">{{ item.qty }}</span></td>
+                        <td style="text-align:center;"><span class="sev-badge sev-low"><i class="fas fa-circle-exclamation" style="font-size:.7rem;"></i> Low</span></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <p style="font-size:0.62rem;color:#94a3b8;margin:4px 0 0 2px;">
+            <span style="color:#b91c1c;font-weight:700;">&#x25CF; Out of Stock</span> &nbsp;
+            <span style="color:#c2410c;font-weight:700;">&#x25CF; Critical (1–2 pcs)</span> &nbsp;
+            <span style="color:#a16207;font-weight:700;">&#x25CF; Low (3–4 pcs)</span>
+        </p>
+        {% else %}
+        <div class="no-warn-msg">
+            <i class="fas fa-circle-check"></i>
+            All products have healthy stock levels. No warnings at this time.
+        </div>
+        {% endif %}
+
+        <!-- Footer -->
+        <div class="doc-footer">
+            <span>Generated: <strong>{{ date }}</strong> at <strong>{{ now }}</strong></span>
+            <span>F.L.E.X Inventory System &bull; Audit Record</span>
+        </div>
+    </div><!-- /report-capture-area -->
 </div>
 
 <script>
+/* ──── Image Export ──── */
 async function downloadReportImage() {
     const reportArea = document.getElementById('report-capture-area');
-    const downloadBtn = document.querySelector('.btn-img');
-    
-    downloadBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>...';
-    downloadBtn.disabled = true;
-
+    const btn = document.querySelector('.btn-img');
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Exporting...';
+    btn.disabled = true;
     try {
-        const canvas = await html2canvas(reportArea, {
-            scale: 3, 
-            useCORS: true,
-            backgroundColor: "#ffffff",
-        });
-
+        const canvas = await html2canvas(reportArea, { scale:3, useCORS:true, backgroundColor:'#ffffff' });
         const link = document.createElement('a');
-        link.href = canvas.toDataURL("image/png", 1.0);
-        link.download = `FLEX_Report_{{ date }}.png`;
+        link.href = canvas.toDataURL('image/png', 1.0);
+        link.download = 'FLEX_Report_{{ date }}.png';
         link.click();
-    } catch (err) {
-        alert("Export failed.");
-    } finally {
-        downloadBtn.innerHTML = '<i class="fas fa-image"></i> IMAGE';
-        downloadBtn.disabled = false;
+    } catch(e) { alert('Image export failed.'); }
+    finally {
+        btn.innerHTML = '<i class="fas fa-image"></i> Image';
+        btn.disabled = false;
     }
+}
+
+/* ──── CSV Export ──── */
+function exportCSV() {
+    const rows = [['#','Product','Flavor','Category','Opening','Stock In','Stock Out','Net','Closing','Revenue']];
+    document.querySelectorAll('#movementTable tbody tr').forEach((tr, i) => {
+        const cells = tr.querySelectorAll('td');
+        if (cells.length < 2) return;
+        rows.push([
+            cells[0]?.innerText.trim(),
+            cells[1]?.innerText.trim(),
+            cells[2]?.innerText.trim(),
+            cells[3]?.innerText.trim(),
+            cells[4]?.innerText.trim(),
+            cells[5]?.innerText.trim(),
+            cells[6]?.innerText.trim(),
+            cells[7]?.innerText.trim(),
+            cells[8]?.innerText.trim(),
+            cells[9]?.innerText.trim(),
+        ]);
+    });
+    const csvContent = rows.map(r => r.map(v => '"'+String(v||'').replace(/"/g,'""')+'"').join(',')).join('\n');
+    const blob = new Blob(['\uFEFF'+csvContent], {type:'text/csv;charset=utf-8;'});
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'FLEX_StockMovement_{{ date }}.csv';
+    link.click();
 }
 </script>
 {% endblock %}
