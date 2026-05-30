@@ -1695,7 +1695,12 @@ TEMPLATES["inventory.html"] = """
     .search-box input:focus { border-color: #705194; outline: none; box-shadow: 0 0 0 3px rgba(112, 81, 148, 0.1); }
 
     /* --- TABLE STYLING --- */
-    .table-responsive { width: 100%; overflow-x: auto; border-radius: 12px; }
+    .table-responsive {
+        width: 100%; overflow-x: auto; border-radius: 12px;
+        scrollbar-width: none;        /* Firefox */
+        -ms-overflow-style: none;     /* IE / Edge */
+    }
+    .table-responsive::-webkit-scrollbar { display: none; } /* Chrome / Safari */
     .product-table { width: 100%; border-collapse: collapse; min-width: 1000px; }
     .product-table th { 
         text-align: left; padding: 15px; font-size: 0.65rem; text-transform: uppercase; 
@@ -1724,6 +1729,53 @@ TEMPLATES["inventory.html"] = """
     .dot-ok { background: #10b981; }
     .dot-low { background: #ef4444; }
 
+    /* --- PRINT BUTTON --- */
+    .print-btn {
+        display: inline-flex; align-items: center; gap: 8px;
+        padding: 9px 20px; border-radius: 50px;
+        background: #705194; color: white; border: none;
+        font-size: 0.8rem; font-weight: 700; cursor: pointer;
+        box-shadow: 0 4px 12px rgba(112,81,148,0.3);
+        transition: 0.2s; white-space: nowrap;
+    }
+    .print-btn:hover { background: #5a3d7a; transform: translateY(-1px); box-shadow: 0 6px 18px rgba(112,81,148,0.4); }
+    .print-btn:active { transform: translateY(0); }
+
+    .header-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+    /* --- PRINT STYLES --- */
+    @media print {
+        .sidebar, .mobile-header, .mobile-toggle, .no-print,
+        .cat-filters, .search-box, .list-header > *:last-child,
+        .flash-container { display: none !important; }
+
+        body { background: white !important; }
+        .main-content { margin-left: 0 !important; width: 100% !important; padding: 20px !important; }
+        .inventory-container { padding: 0 !important; }
+
+        .header-flex { margin-bottom: 12px !important; }
+        .header-title h1 { font-size: 1.4rem !important; }
+
+        .list-card { box-shadow: none !important; border: 1px solid #ddd !important; padding: 16px !important; }
+        .list-header { margin-bottom: 12px !important; }
+
+        /* Make all columns print-visible */
+        .table-responsive { overflow: visible !important; }
+        .product-table { min-width: unset !important; width: 100% !important; font-size: 0.75rem !important; }
+        .product-table th, .product-table td { padding: 8px 10px !important; }
+
+        /* Strip image column to save space */
+        .product-table th:first-child,
+        .product-table td:first-child { display: none !important; }
+
+        /* Print header watermark */
+        .list-header::after {
+            content: "F.L.E.X VAPE SHOP — Inventory Report";
+            display: block; font-size: 0.65rem; color: #94a3b8;
+            font-style: italic; margin-top: 4px;
+        }
+    }
+
     @media (max-width: 768px) {
         .header-flex { flex-direction: column; align-items: flex-start; gap: 15px; }
         .list-header { flex-direction: column; align-items: stretch; }
@@ -1738,17 +1790,22 @@ TEMPLATES["inventory.html"] = """
         <div class="header-title">
             <h1>Inventory</h1>
         </div>
-        <div class="cat-filters">
-            <button class="cat-pill active" onclick="filterByCategory('all', this)"><i class="fas fa-border-all"></i> All</button>
-            {% set categories = [] %}
-            {% for key, p in products.items() %}
-                {% if p.type and p.type not in categories %}
-                    {% set _ = categories.append(p.type) %}
-                {% endif %}
-            {% endfor %}
-            {% for cat in categories|sort %}
-            <button class="cat-pill" onclick="filterByCategory('{{ cat|lower }}', this)">{{ cat }}</button>
-            {% endfor %}
+        <div class="header-right">
+            <button class="print-btn no-print" onclick="window.print()">
+                <i class="fas fa-print"></i> Print
+            </button>
+            <div class="cat-filters">
+                <button class="cat-pill active" onclick="filterByCategory('all', this)"><i class="fas fa-border-all"></i> All</button>
+                {% set categories = [] %}
+                {% for key, p in products.items() %}
+                    {% if p.type and p.type not in categories %}
+                        {% set _ = categories.append(p.type) %}
+                    {% endif %}
+                {% endfor %}
+                {% for cat in categories|sort %}
+                <button class="cat-pill" onclick="filterByCategory('{{ cat|lower }}', this)">{{ cat }}</button>
+                {% endfor %}
+            </div>
         </div>
     </div>
 
@@ -2898,12 +2955,18 @@ TEMPLATES["reports.html"] = """
 
     /* ===== PRINT ===== */
     @media print {
-        nav,.sidebar,.mobile-header,.mobile-toggle,.no-print,.swipe-hint { display:none !important; }
-        body { background:white; margin:0; padding:0; }
-        .main-content { margin-left:0 !important; width:100% !important; padding:0 !important; }
-        #report-capture-area { border:none; box-shadow:none; padding:40px; border-radius:0; }
-        .table-responsive { overflow:visible !important; }
-        .warn-table-wrap { overflow:visible !important; }
+        nav, .sidebar, .mobile-header, .mobile-toggle, .no-print, .swipe-hint,
+        .flash-container, .period-selector { display: none !important; }
+        body { background: white; margin: 0; padding: 0; }
+        .main-content { margin-left: 0 !important; width: 100% !important; padding: 0 !important; }
+        #report-capture-area { border: none; box-shadow: none; padding: 30px; border-radius: 0; }
+        .table-responsive { overflow: visible !important; }
+        .warn-table-wrap { overflow: visible !important; }
+        .report-grid { grid-template-columns: repeat(2, 1fr) !important; }
+        .report-controls { display: none !important; }
+        a { text-decoration: none !important; }
+        .stat-card { box-shadow: none !important; border: 1px solid #e2e8f0 !important; }
+        .report-table th, .log-table th { background: #f8fafc !important; -webkit-print-color-adjust: exact; }
     }
 </style>
 
@@ -4730,11 +4793,17 @@ TEMPLATES["purchase_report.html"] = """
     }
 
     @media print {
-        nav, .sidebar, .mobile-header, .mobile-toggle, .no-print, header, .swipe-hint { display: none !important; }
+        nav, .sidebar, .mobile-header, .mobile-toggle, .no-print, header,
+        .swipe-hint, .flash-container, .report-controls { display: none !important; }
         body { background: white; margin: 0; padding: 0; }
         .main-content { margin-left: 0 !important; width: 100% !important; padding: 0 !important; }
-        #report-capture-area { border: none; box-shadow: none; padding: 40px; width: 100%; }
+        #report-capture-area { border: none; box-shadow: none; padding: 30px; width: 100%; border-radius: 0; }
         .table-responsive { overflow: visible !important; }
+        .report-table, .log-table { min-width: unset !important; width: 100% !important; font-size: 0.72rem !important; }
+        .report-table th, .log-table th { background: #f1f5f9 !important; -webkit-print-color-adjust: exact; }
+        .stat-card { box-shadow: none !important; border: 1px solid #e2e8f0 !important; }
+        .report-grid { grid-template-columns: repeat(3, 1fr) !important; }
+        a { text-decoration: none !important; }
     }
 </style>
 
