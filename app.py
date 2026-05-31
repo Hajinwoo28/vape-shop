@@ -1258,7 +1258,11 @@ TEMPLATES["base.html"] = """
         .divider { height: 1px; background: rgba(255,255,255,0.08); margin: 15px 25px; }
         .menu-label { padding: 10px 25px; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1.5px; color: #576c8c; font-weight: 700; }
 
-        .nav-links { list-style: none; flex-grow: 1; padding: 0 15px; }
+        .nav-links { list-style: none; flex-grow: 1; padding: 0 15px; overflow-y: auto; }
+        .nav-links::-webkit-scrollbar { width: 5px; }
+        .nav-links::-webkit-scrollbar-track { background: transparent; }
+        .nav-links::-webkit-scrollbar-thumb { background: rgba(112,81,148,0.4); border-radius: 10px; }
+        .nav-links::-webkit-scrollbar-thumb:hover { background: rgba(112,81,148,0.7); }
         .nav-links li { margin-bottom: 4px; }
 
         /* Staggered sidebar item entrance */
