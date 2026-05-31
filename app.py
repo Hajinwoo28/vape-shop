@@ -431,7 +431,17 @@ def api_low_stock():
 @app.route('/suppliers')
 def suppliers():
     suppliers_list = Supplier.query.order_by(Supplier.name).all()
-    return render_template('suppliers.html', suppliers=suppliers_list)
+    # Stats for dashboard
+    total_suppliers = len(suppliers_list)
+    total_pos = PurchaseOrder.query.count()
+    active_pos = PurchaseOrder.query.filter(PurchaseOrder.status.in_(['draft', 'sent'])).count()
+    total_spent = sum(sum(item.qty_ordered * item.unit_cost for item in o.items) for o in PurchaseOrder.query.filter(PurchaseOrder.status == 'received').all())
+    return render_template('suppliers.html',
+        suppliers=suppliers_list,
+        total_suppliers=total_suppliers,
+        total_pos=total_pos,
+        active_pos=active_pos,
+        total_spent=total_spent)
 
 @app.route('/supplier/add', methods=['POST'])
 def supplier_add():
@@ -481,7 +491,18 @@ def purchase_orders():
     order_totals = {}
     for o in orders:
         order_totals[o.id] = sum(item.qty_ordered * item.unit_cost for item in o.items)
-    return render_template('purchase_orders.html', orders=orders, order_totals=order_totals)
+    # Stats
+    draft_count = sum(1 for o in orders if o.status == 'draft')
+    sent_count = sum(1 for o in orders if o.status == 'sent')
+    received_count = sum(1 for o in orders if o.status == 'received')
+    total_value = sum(order_totals.get(o.id, 0) for o in orders)
+    return render_template('purchase_orders.html',
+        orders=orders,
+        order_totals=order_totals,
+        draft_count=draft_count,
+        sent_count=sent_count,
+        received_count=received_count,
+        total_value=total_value)
 
 @app.route('/purchase_order/new')
 def purchase_order_new():
@@ -6124,68 +6145,230 @@ TEMPLATES["suppliers.html"] = """
 {% extends "base.html" %}
 {% block content %}
 <style>
-    :root { --brand:#705194; --brand-light:#f3eeff; --green:#10b981; --red:#ef4444; --radius:16px; --shadow:0 2px 10px rgba(112,81,148,.05); }
-    .suppliers-wrapper { max-width:900px; margin:0 auto; padding:10px; }
-    .page-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:12px; }
-    .page-header h2 { margin:0; font-size:1.2rem; font-weight:800; color:#1e293b; }
-    .btn-add { background:var(--brand); color:white; border:none; padding:10px 20px; border-radius:10px; font-weight:700; cursor:pointer; font-size:0.8rem; display:flex; align-items:center; gap:6px; }
-    .btn-add:hover { opacity:0.9; }
+    :root { --brand:#705194; --brand-light:#f3eeff; --brand-dark:#5a3f7a; --green:#10b981; --green-light:#ecfdf5; --red:#ef4444; --red-light:#fef2f2; --orange:#f59e0b; --blue:#3b82f6; --blue-light:#eff6ff; --navy:#162135; --radius:16px; --radius-sm:10px; --shadow:0 2px 10px rgba(112,81,148,.05); --shadow-lg:0 8px 30px rgba(112,81,148,.1); }
 
-    .supplier-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:15px; }
-    .supplier-card { background:white; border:1.5px solid #e8e4f0; border-radius:var(--radius); padding:18px; box-shadow:var(--shadow); position:relative; }
-    .supplier-card h3 { margin:0 0 8px; font-size:0.95rem; color:#1e293b; }
-    .supplier-card .meta { font-size:0.75rem; color:#64748b; margin-bottom:4px; display:flex; align-items:center; gap:6px; }
-    .supplier-card .meta i { width:14px; color:var(--brand); }
-    .supplier-card .actions { display:flex; gap:6px; margin-top:12px; border-top:1px solid #e8e4f0; padding-top:10px; }
-    .btn-sm { border:none; padding:6px 12px; border-radius:6px; font-size:0.7rem; font-weight:700; cursor:pointer; display:flex; align-items:center; gap:4px; }
+    /* Animations */
+    @keyframes fadeInUp { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:translateY(0); } }
+    @keyframes slideDown { from { opacity:0; transform:translateY(-10px); } to { opacity:1; transform:translateY(0); } }
+    @keyframes scaleIn { from { opacity:0; transform:scale(0.95); } to { opacity:1; transform:scale(1); } }
+    @keyframes pulse { 0%,100% { transform:scale(1); } 50% { transform:scale(1.05); } }
+    @keyframes shimmer { 0% { background-position:-200% 0; } 100% { background-position:200% 0; } }
+    @keyframes countUp { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+
+    .suppliers-wrapper { max-width:960px; margin:0 auto; padding:10px; }
+
+    /* Header */
+    .page-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:12px; animation:fadeInUp 0.4s ease both; }
+    .page-header h2 { margin:0; font-size:1.2rem; font-weight:800; color:#1e293b; display:flex; align-items:center; gap:10px; }
+    .page-header h2 .icon-wrap { width:38px; height:38px; background:linear-gradient(135deg,var(--brand),var(--brand-dark)); border-radius:10px; display:flex; align-items:center; justify-content:center; color:white; font-size:0.9rem; box-shadow:0 4px 14px rgba(112,81,148,.3); }
+
+    .header-actions { display:flex; gap:8px; }
+    .btn-add { background:linear-gradient(135deg,var(--brand),var(--brand-dark)); color:white; border:none; padding:10px 22px; border-radius:var(--radius-sm); font-weight:700; cursor:pointer; font-size:0.82rem; display:flex; align-items:center; gap:7px; transition:all 0.25s ease; box-shadow:0 4px 14px rgba(112,81,148,.25); position:relative; overflow:hidden; }
+    .btn-add:hover { transform:translateY(-2px); box-shadow:0 6px 20px rgba(112,81,148,.35); }
+    .btn-add:active { transform:translateY(0) scale(0.97); }
+    .btn-add::after { content:''; position:absolute; inset:0; background:linear-gradient(90deg,transparent,rgba(255,255,255,.15),transparent); background-size:200% 100%; animation:shimmer 3s infinite; }
+
+    /* Stats Row */
+    .stats-row { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin-bottom:20px; }
+    .stat-card { background:white; border:1.5px solid #e8e4f0; border-radius:var(--radius); padding:16px 18px; box-shadow:var(--shadow); position:relative; overflow:hidden; transition:all 0.3s ease; }
+    .stat-card:hover { transform:translateY(-2px); box-shadow:var(--shadow-lg); border-color:rgba(112,81,148,.2); }
+    .stat-card .stat-icon { width:36px; height:36px; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:0.85rem; margin-bottom:10px; }
+    .stat-card .stat-icon.purple { background:var(--brand-light); color:var(--brand); }
+    .stat-card .stat-icon.green { background:var(--green-light); color:var(--green); }
+    .stat-card .stat-icon.blue { background:var(--blue-light); color:var(--blue); }
+    .stat-card .stat-icon.orange { background:#fffbeb; color:var(--orange); }
+    .stat-card .stat-label { font-size:0.65rem; font-weight:800; text-transform:uppercase; color:#94a3b8; letter-spacing:0.6px; margin-bottom:4px; }
+    .stat-card .stat-value { font-size:1.35rem; font-weight:900; color:#1e293b; animation:countUp 0.5s ease both; }
+    .stat-card::before { content:''; position:absolute; top:0; right:0; width:80px; height:80px; border-radius:50%; opacity:0.04; transform:translate(20px,-20px); }
+    .stat-card:nth-child(1)::before { background:var(--brand); }
+    .stat-card:nth-child(2)::before { background:var(--green); }
+    .stat-card:nth-child(3)::before { background:var(--orange); }
+    .stat-card:nth-child(4)::before { background:var(--blue); }
+
+    /* Search & Filter Toolbar */
+    .toolbar { display:flex; gap:10px; margin-bottom:16px; align-items:center; flex-wrap:wrap; animation:fadeInUp 0.4s ease 0.1s both; }
+    .search-box { flex:1; min-width:200px; position:relative; }
+    .search-box i { position:absolute; left:12px; top:50%; transform:translateY(-50%); color:#94a3b8; font-size:0.8rem; }
+    .search-box input { width:100%; padding:10px 12px 10px 36px; border:1.5px solid #e8e4f0; border-radius:var(--radius-sm); font-size:0.82rem; transition:all 0.25s ease; box-sizing:border-box; background:white; }
+    .search-box input:focus { outline:none; border-color:var(--brand); box-shadow:0 0 0 3px rgba(112,81,148,.1); }
+    .view-toggle { display:flex; background:#f1f5f9; padding:3px; border-radius:8px; }
+    .view-btn { border:none; background:transparent; padding:7px 12px; border-radius:6px; cursor:pointer; color:#94a3b8; font-size:0.8rem; transition:all 0.2s; }
+    .view-btn.active { background:white; color:var(--brand); box-shadow:0 2px 8px rgba(0,0,0,.06); font-weight:700; }
+
+    /* Grid */
+    .supplier-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(290px,1fr)); gap:14px; }
+
+    /* Cards */
+    .supplier-card { background:white; border:1.5px solid #e8e4f0; border-radius:var(--radius); padding:18px; box-shadow:var(--shadow); position:relative; transition:all 0.3s cubic-bezier(0.4,0,0.2,1); overflow:hidden; }
+    .supplier-card:hover { transform:translateY(-3px); box-shadow:var(--shadow-lg); border-color:rgba(112,81,148,.25); }
+    .supplier-card::before { content:''; position:absolute; top:0; left:0; right:0; height:3px; background:linear-gradient(90deg,var(--brand),#9b6fc4,var(--brand)); opacity:0; transition:opacity 0.3s; }
+    .supplier-card:hover::before { opacity:1; }
+    .supplier-card:nth-child(1) { animation:fadeInUp 0.4s ease 0.15s both; }
+    .supplier-card:nth-child(2) { animation:fadeInUp 0.4s ease 0.2s both; }
+    .supplier-card:nth-child(3) { animation:fadeInUp 0.4s ease 0.25s both; }
+    .supplier-card:nth-child(4) { animation:fadeInUp 0.4s ease 0.3s both; }
+    .supplier-card:nth-child(n+5) { animation:fadeInUp 0.4s ease 0.35s both; }
+
+    .card-top { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px; }
+    .card-top h3 { margin:0; font-size:0.92rem; color:#1e293b; font-weight:800; }
+    .po-count { display:inline-flex; align-items:center; gap:3px; background:var(--brand-light); color:var(--brand); padding:3px 9px; border-radius:99px; font-size:0.62rem; font-weight:800; transition:all 0.2s; }
+    .po-count:hover { background:var(--brand); color:white; }
+    .supplier-card .meta { font-size:0.74rem; color:#64748b; margin-bottom:4px; display:flex; align-items:center; gap:7px; }
+    .supplier-card .meta i { width:14px; color:var(--brand); font-size:0.7rem; }
+    .supplier-card .actions { display:flex; gap:6px; margin-top:12px; border-top:1px solid #f1f5f9; padding-top:10px; }
+    .btn-sm { border:none; padding:6px 12px; border-radius:7px; font-size:0.7rem; font-weight:700; cursor:pointer; display:flex; align-items:center; gap:4px; transition:all 0.2s ease; }
     .btn-edit { background:#f1f5f9; color:#475569; }
-    .btn-delete { background:#fef2f2; color:#ef4444; }
-    .po-count { display:inline-block; background:var(--brand-light); color:var(--brand); padding:2px 8px; border-radius:99px; font-size:0.65rem; font-weight:700; }
+    .btn-edit:hover { background:#e2e8f0; transform:translateY(-1px); }
+    .btn-delete { background:var(--red-light); color:var(--red); }
+    .btn-delete:hover { background:#fecaca; transform:translateY(-1px); }
+    .btn-email { background:var(--blue-light); color:var(--blue); }
+    .btn-email:hover { background:#dbeafe; transform:translateY(-1px); }
+    .btn-orders { background:var(--green-light); color:var(--green); }
+    .btn-orders:hover { background:#d1fae5; transform:translateY(-1px); }
+
+    /* List View */
+    .supplier-list { display:flex; flex-direction:column; gap:8px; }
+    .supplier-list .supplier-row { background:white; border:1.5px solid #e8e4f0; border-radius:var(--radius-sm); padding:12px 18px; display:flex; justify-content:space-between; align-items:center; gap:12px; box-shadow:var(--shadow); transition:all 0.25s ease; }
+    .supplier-list .supplier-row:hover { border-color:rgba(112,81,148,.25); box-shadow:var(--shadow-lg); transform:translateX(3px); }
+    .supplier-list .row-info { display:flex; align-items:center; gap:14px; flex:1; min-width:0; }
+    .supplier-list .row-avatar { width:38px; height:38px; background:linear-gradient(135deg,var(--brand-light),#e8e4f0); border-radius:10px; display:flex; align-items:center; justify-content:center; font-weight:900; color:var(--brand); font-size:0.85rem; flex-shrink:0; }
+    .supplier-list .row-details { min-width:0; }
+    .supplier-list .row-details h4 { margin:0; font-size:0.85rem; color:#1e293b; }
+    .supplier-list .row-details .meta-inline { font-size:0.7rem; color:#94a3b8; display:flex; gap:10px; flex-wrap:wrap; }
+    .supplier-list .row-actions { display:flex; gap:5px; }
 
     /* Modal */
-    .modal-overlay { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,.4); z-index:1000; align-items:center; justify-content:center; }
+    .modal-overlay { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,.5); z-index:1000; align-items:center; justify-content:center; backdrop-filter:blur(4px); }
     .modal-overlay.active { display:flex; }
-    .modal-box { background:white; border-radius:var(--radius); padding:24px; width:90%; max-width:480px; max-height:90vh; overflow-y:auto; }
-    .modal-box h3 { margin:0 0 16px; font-size:1rem; }
-    .form-group { margin-bottom:12px; }
-    .form-group label { display:block; font-size:0.72rem; font-weight:700; color:#475569; text-transform:uppercase; margin-bottom:4px; }
-    .form-group input, .form-group textarea { width:100%; padding:10px; border:1.5px solid #e8e4f0; border-radius:8px; font-size:0.82rem; box-sizing:border-box; }
-    .form-group input:focus, .form-group textarea:focus { outline:none; border-color:var(--brand); }
-    .modal-actions { display:flex; gap:8px; justify-content:flex-end; margin-top:16px; }
-    .btn-cancel { background:#f1f5f9; color:#475569; border:none; padding:10px 20px; border-radius:8px; font-weight:700; cursor:pointer; font-size:0.8rem; }
-    .btn-save { background:var(--brand); color:white; border:none; padding:10px 20px; border-radius:8px; font-weight:700; cursor:pointer; font-size:0.8rem; }
-    .empty-state { text-align:center; padding:60px 20px; color:#94a3b8; }
-    .empty-state i { font-size:3rem; margin-bottom:12px; opacity:0.3; }
+    .modal-box { background:white; border-radius:var(--radius); padding:28px; width:92%; max-width:500px; max-height:90vh; overflow-y:auto; animation:scaleIn 0.3s cubic-bezier(0.4,0,0.2,1); box-shadow:0 20px 60px rgba(0,0,0,.15); }
+    .modal-box h3 { margin:0 0 20px; font-size:1.05rem; font-weight:800; color:#1e293b; display:flex; align-items:center; gap:8px; }
+    .modal-box h3 i { color:var(--brand); }
+    .form-group { margin-bottom:14px; }
+    .form-group label { display:block; font-size:0.7rem; font-weight:800; color:#475569; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:5px; }
+    .form-group input, .form-group textarea { width:100%; padding:11px 14px; border:1.5px solid #e8e4f0; border-radius:var(--radius-sm); font-size:0.82rem; box-sizing:border-box; transition:all 0.25s ease; background:white; }
+    .form-group input:focus, .form-group textarea:focus { outline:none; border-color:var(--brand); box-shadow:0 0 0 3px rgba(112,81,148,.1); }
+    .form-group input::placeholder { color:#cbd5e1; }
+    .modal-actions { display:flex; gap:8px; justify-content:flex-end; margin-top:20px; }
+    .btn-cancel { background:#f1f5f9; color:#475569; border:none; padding:11px 22px; border-radius:var(--radius-sm); font-weight:700; cursor:pointer; font-size:0.82rem; transition:all 0.2s; }
+    .btn-cancel:hover { background:#e2e8f0; }
+    .btn-save { background:linear-gradient(135deg,var(--brand),var(--brand-dark)); color:white; border:none; padding:11px 22px; border-radius:var(--radius-sm); font-weight:700; cursor:pointer; font-size:0.82rem; transition:all 0.25s; box-shadow:0 4px 14px rgba(112,81,148,.25); }
+    .btn-save:hover { transform:translateY(-1px); box-shadow:0 6px 18px rgba(112,81,148,.35); }
+
+    /* Empty State */
+    .empty-state { text-align:center; padding:60px 20px; color:#94a3b8; animation:fadeInUp 0.5s ease both; }
+    .empty-state .empty-icon { width:80px; height:80px; background:var(--brand-light); border-radius:50%; display:flex; align-items:center; justify-content:center; margin:0 auto 16px; font-size:1.8rem; color:var(--brand); animation:pulse 2s ease infinite; }
+    .empty-state h3 { font-size:1rem; color:#475569; margin:0 0 6px; }
+    .empty-state p { font-size:0.82rem; margin:0; }
+
+    /* Responsive */
+    @media (max-width:600px) {
+        .stats-row { grid-template-columns:repeat(2,1fr); }
+        .supplier-grid { grid-template-columns:1fr; }
+        .supplier-list .row-info { flex-direction:column; align-items:flex-start; gap:6px; }
+    }
 </style>
 
 <div class="suppliers-wrapper">
+    <!-- Header -->
     <div class="page-header">
-        <h2><i class="fas fa-truck" style="color:var(--brand);margin-right:8px;"></i>Suppliers</h2>
-        <button class="btn-add" onclick="openModal()"><i class="fas fa-plus"></i> Add Supplier</button>
+        <h2><span class="icon-wrap"><i class="fas fa-truck"></i></span> Suppliers</h2>
+        <div class="header-actions">
+            <button class="btn-add" onclick="openModal()"><i class="fas fa-plus"></i> Add Supplier</button>
+        </div>
+    </div>
+
+    <!-- Stats Dashboard -->
+    <div class="stats-row">
+        <div class="stat-card">
+            <div class="stat-icon purple"><i class="fas fa-truck"></i></div>
+            <div class="stat-label">Total Suppliers</div>
+            <div class="stat-value">{{ total_suppliers }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon green"><i class="fas fa-file-invoice"></i></div>
+            <div class="stat-label">Total PO</div>
+            <div class="stat-value">{{ total_pos }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon orange"><i class="fas fa-clock"></i></div>
+            <div class="stat-label">Active Orders</div>
+            <div class="stat-value">{{ active_pos }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon blue"><i class="fas fa-coins"></i></div>
+            <div class="stat-label">Total Spent</div>
+            <div class="stat-value">₱{{ "{:,.2f}".format(total_spent) }}</div>
+        </div>
+    </div>
+
+    <!-- Search & Toolbar -->
+    <div class="toolbar">
+        <div class="search-box">
+            <i class="fas fa-search"></i>
+            <input type="text" id="searchInput" placeholder="Search suppliers by name, contact, or address..." oninput="filterSuppliers()">
+        </div>
+        <div class="view-toggle">
+            <button class="view-btn active" id="gridViewBtn" onclick="setView('grid')"><i class="fas fa-th-large"></i></button>
+            <button class="view-btn" id="listViewBtn" onclick="setView('list')"><i class="fas fa-list"></i></button>
+        </div>
     </div>
 
     {% if suppliers %}
-    <div class="supplier-grid">
+    <!-- Grid View -->
+    <div class="supplier-grid" id="gridView">
         {% for s in suppliers %}
-        <div class="supplier-card">
-            <h3>{{ s.name }} <span class="po-count">{{ s.purchase_orders|length }} PO</span></h3>
+        <div class="supplier-card" data-search="{{ s.name|lower }} {{ (s.contact or '')|lower }} {{ (s.address or '')|lower }} {{ (s.phone or '')|lower }} {{ (s.email or '')|lower }}">
+            <div class="card-top">
+                <h3>{{ s.name }}</h3>
+                <span class="po-count"><i class="fas fa-file-invoice" style="font-size:0.55rem;"></i> {{ s.purchase_orders|length }} PO</span>
+            </div>
             {% if s.contact %}<div class="meta"><i class="fas fa-user"></i>{{ s.contact }}</div>{% endif %}
             {% if s.phone %}<div class="meta"><i class="fas fa-phone"></i>{{ s.phone }}</div>{% endif %}
             {% if s.email %}<div class="meta"><i class="fas fa-envelope"></i>{{ s.email }}</div>{% endif %}
             {% if s.address %}<div class="meta"><i class="fas fa-map-marker-alt"></i>{{ s.address }}</div>{% endif %}
             <div class="actions">
                 <button class="btn-sm btn-edit" onclick="openEditModal({{ s.id }}, '{{ s.name|e }}', '{{ s.contact|e }}', '{{ s.phone|e }}', '{{ s.email|e }}', '{{ s.address|e }}')"><i class="fas fa-pen"></i> Edit</button>
-                <form method="POST" action="/supplier/delete/{{ s.id }}" onsubmit="return confirm('Delete {{ s.name|e }}?')" style="display:inline;">
-                    <button class="btn-sm btn-delete" type="submit"><i class="fas fa-trash"></i> Delete</button>
+                {% if s.email %}<a href="mailto:{{ s.email }}" class="btn-sm btn-email"><i class="fas fa-envelope"></i> Email</a>{% endif %}
+                <a href="/purchase_orders?supplier={{ s.id }}" class="btn-sm btn-orders"><i class="fas fa-file-invoice"></i> Orders</a>
+                <form method="POST" action="/supplier/delete/{{ s.id }}" onsubmit="return confirm('Delete {{ s.name|e }}?')" style="display:inline;margin-left:auto;">
+                    <button class="btn-sm btn-delete" type="submit"><i class="fas fa-trash"></i></button>
                 </form>
             </div>
         </div>
         {% endfor %}
     </div>
+
+    <!-- List View -->
+    <div class="supplier-list" id="listView" style="display:none;">
+        {% for s in suppliers %}
+        <div class="supplier-row" data-search="{{ s.name|lower }} {{ (s.contact or '')|lower }} {{ (s.address or '')|lower }} {{ (s.phone or '')|lower }} {{ (s.email or '')|lower }}">
+            <div class="row-info">
+                <div class="row-avatar">{{ s.name[0]|upper }}</div>
+                <div class="row-details">
+                    <h4>{{ s.name }} <span class="po-count" style="margin-left:6px;"><i class="fas fa-file-invoice" style="font-size:0.5rem;"></i> {{ s.purchase_orders|length }}</span></h4>
+                    <div class="meta-inline">
+                        {% if s.contact %}<span><i class="fas fa-user"></i> {{ s.contact }}</span>{% endif %}
+                        {% if s.phone %}<span><i class="fas fa-phone"></i> {{ s.phone }}</span>{% endif %}
+                        {% if s.email %}<span><i class="fas fa-envelope"></i> {{ s.email }}</span>{% endif %}
+                        {% if s.address %}<span><i class="fas fa-map-marker-alt"></i> {{ s.address }}</span>{% endif %}
+                    </div>
+                </div>
+            </div>
+            <div class="row-actions">
+                <button class="btn-sm btn-edit" onclick="openEditModal({{ s.id }}, '{{ s.name|e }}', '{{ s.contact|e }}', '{{ s.phone|e }}', '{{ s.email|e }}', '{{ s.address|e }}')"><i class="fas fa-pen"></i></button>
+                <form method="POST" action="/supplier/delete/{{ s.id }}" onsubmit="return confirm('Delete {{ s.name|e }}?')" style="display:inline;">
+                    <button class="btn-sm btn-delete" type="submit"><i class="fas fa-trash"></i></button>
+                </form>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
     {% else %}
     <div class="empty-state">
-        <i class="fas fa-truck"></i>
-        <p>No suppliers yet. Add your first supplier to start creating purchase orders.</p>
+        <div class="empty-icon"><i class="fas fa-truck"></i></div>
+        <h3>No Suppliers Yet</h3>
+        <p>Add your first supplier to start creating purchase orders.</p>
     </div>
     {% endif %}
 </div>
@@ -6193,7 +6376,7 @@ TEMPLATES["suppliers.html"] = """
 <!-- Add/Edit Modal -->
 <div class="modal-overlay" id="supplierModal">
     <div class="modal-box">
-        <h3 id="modalTitle">Add Supplier</h3>
+        <h3><i class="fas fa-truck"></i> <span id="modalTitle">Add Supplier</span></h3>
         <form id="supplierForm" method="POST">
             <input type="hidden" id="editId" name="edit_id" value="">
             <div class="form-group">
@@ -6218,7 +6401,7 @@ TEMPLATES["suppliers.html"] = """
             </div>
             <div class="modal-actions">
                 <button type="button" class="btn-cancel" onclick="closeModal()">Cancel</button>
-                <button type="submit" class="btn-save">Save Supplier</button>
+                <button type="submit" class="btn-save"><i class="fas fa-check" style="margin-right:4px;"></i> Save Supplier</button>
             </div>
         </form>
     </div>
@@ -6253,6 +6436,41 @@ function closeModal() {
 document.getElementById('supplierModal').addEventListener('click', function(e) {
     if (e.target === this) closeModal();
 });
+
+// Search/Filter
+function filterSuppliers() {
+    const q = document.getElementById('searchInput').value.toLowerCase();
+    document.querySelectorAll('[data-search]').forEach(el => {
+        const match = el.dataset.search.includes(q);
+        el.style.display = match ? '' : 'none';
+        if (match) {
+            el.style.animation = 'fadeInUp 0.3s ease both';
+        }
+    });
+}
+
+// View Toggle
+function setView(mode) {
+    const grid = document.getElementById('gridView');
+    const list = document.getElementById('listView');
+    document.getElementById('gridViewBtn').classList.toggle('active', mode === 'grid');
+    document.getElementById('listViewBtn').classList.toggle('active', mode === 'list');
+    if (mode === 'grid') {
+        grid.style.display = '';
+        list.style.display = 'none';
+    } else {
+        grid.style.display = 'none';
+        list.style.display = '';
+    }
+}
+
+// Keyboard shortcut: Ctrl+K to focus search
+document.addEventListener('keydown', function(e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        document.getElementById('searchInput').focus();
+    }
+});
 </script>
 {% endblock %}
 """
@@ -6264,44 +6482,162 @@ TEMPLATES["purchase_orders.html"] = """
 {% extends "base.html" %}
 {% block content %}
 <style>
-    :root { --brand:#705194; --brand-light:#f3eeff; --green:#10b981; --red:#ef4444; --orange:#f59e0b; --blue:#3b82f6; --radius:16px; --shadow:0 2px 10px rgba(112,81,148,.05); }
+    :root { --brand:#705194; --brand-light:#f3eeff; --brand-dark:#5a3f7a; --green:#10b981; --green-light:#ecfdf5; --red:#ef4444; --red-light:#fef2f2; --orange:#f59e0b; --orange-light:#fffbeb; --blue:#3b82f6; --blue-light:#eff6ff; --navy:#162135; --radius:16px; --radius-sm:10px; --shadow:0 2px 10px rgba(112,81,148,.05); --shadow-lg:0 8px 30px rgba(112,81,148,.1); }
+
+    /* Animations */
+    @keyframes fadeInUp { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:translateY(0); } }
+    @keyframes slideInRight { from { opacity:0; transform:translateX(20px); } to { opacity:1; transform:translateX(0); } }
+    @keyframes scaleIn { from { opacity:0; transform:scale(0.95); } to { opacity:1; transform:scale(1); } }
+    @keyframes shimmer { 0% { background-position:-200% 0; } 100% { background-position:200% 0; } }
+    @keyframes countUp { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+    @keyframes pulse { 0%,100% { transform:scale(1); } 50% { transform:scale(1.04); } }
+    @keyframes dotPulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
+
     .po-wrapper { max-width:960px; margin:0 auto; padding:10px; }
-    .page-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:12px; }
-    .page-header h2 { margin:0; font-size:1.2rem; font-weight:800; color:#1e293b; }
-    .btn-add { background:var(--brand); color:white; border:none; padding:10px 20px; border-radius:10px; font-weight:700; cursor:pointer; font-size:0.8rem; display:flex; align-items:center; gap:6px; text-decoration:none; }
 
+    /* Header */
+    .page-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:12px; animation:fadeInUp 0.4s ease both; }
+    .page-header h2 { margin:0; font-size:1.2rem; font-weight:800; color:#1e293b; display:flex; align-items:center; gap:10px; }
+    .page-header h2 .icon-wrap { width:38px; height:38px; background:linear-gradient(135deg,var(--brand),var(--brand-dark)); border-radius:10px; display:flex; align-items:center; justify-content:center; color:white; font-size:0.9rem; box-shadow:0 4px 14px rgba(112,81,148,.3); }
+    .btn-add { background:linear-gradient(135deg,var(--brand),var(--brand-dark)); color:white; border:none; padding:10px 22px; border-radius:var(--radius-sm); font-weight:700; cursor:pointer; font-size:0.82rem; display:flex; align-items:center; gap:7px; transition:all 0.25s ease; box-shadow:0 4px 14px rgba(112,81,148,.25); text-decoration:none; position:relative; overflow:hidden; }
+    .btn-add:hover { transform:translateY(-2px); box-shadow:0 6px 20px rgba(112,81,148,.35); }
+    .btn-add:active { transform:translateY(0) scale(0.97); }
+    .btn-add::after { content:''; position:absolute; inset:0; background:linear-gradient(90deg,transparent,rgba(255,255,255,.15),transparent); background-size:200% 100%; animation:shimmer 3s infinite; }
+
+    /* Stats Row */
+    .stats-row { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; margin-bottom:20px; }
+    .stat-card { background:white; border:1.5px solid #e8e4f0; border-radius:var(--radius); padding:16px 18px; box-shadow:var(--shadow); position:relative; overflow:hidden; transition:all 0.3s ease; cursor:pointer; }
+    .stat-card:hover { transform:translateY(-2px); box-shadow:var(--shadow-lg); }
+    .stat-card.active { border-color:var(--brand); background:var(--brand-light); }
+    .stat-card .stat-icon { width:36px; height:36px; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:0.85rem; margin-bottom:10px; }
+    .stat-card .stat-icon.purple { background:var(--brand-light); color:var(--brand); }
+    .stat-card .stat-icon.green { background:var(--green-light); color:var(--green); }
+    .stat-card .stat-icon.blue { background:var(--blue-light); color:var(--blue); }
+    .stat-card .stat-icon.orange { background:var(--orange-light); color:var(--orange); }
+    .stat-card .stat-label { font-size:0.62rem; font-weight:800; text-transform:uppercase; color:#94a3b8; letter-spacing:0.6px; margin-bottom:4px; }
+    .stat-card .stat-value { font-size:1.3rem; font-weight:900; color:#1e293b; animation:countUp 0.5s ease both; }
+    .stat-card .stat-dot { width:7px; height:7px; border-radius:50%; position:absolute; top:14px; right:14px; }
+    .stat-card .stat-dot.purple { background:var(--brand); animation:dotPulse 2s infinite; }
+    .stat-card .stat-dot.green { background:var(--green); animation:dotPulse 2s infinite 0.3s; }
+    .stat-card .stat-dot.blue { background:var(--blue); animation:dotPulse 2s infinite 0.6s; }
+    .stat-card .stat-dot.orange { background:var(--orange); animation:dotPulse 2s infinite 0.9s; }
+
+    /* Toolbar */
+    .toolbar { display:flex; gap:10px; margin-bottom:16px; align-items:center; flex-wrap:wrap; animation:fadeInUp 0.4s ease 0.1s both; }
+    .search-box { flex:1; min-width:200px; position:relative; }
+    .search-box i { position:absolute; left:12px; top:50%; transform:translateY(-50%); color:#94a3b8; font-size:0.8rem; }
+    .search-box input { width:100%; padding:10px 12px 10px 36px; border:1.5px solid #e8e4f0; border-radius:var(--radius-sm); font-size:0.82rem; transition:all 0.25s ease; box-sizing:border-box; background:white; }
+    .search-box input:focus { outline:none; border-color:var(--brand); box-shadow:0 0 0 3px rgba(112,81,148,.1); }
+    .filter-chips { display:flex; gap:6px; flex-wrap:wrap; }
+    .filter-chip { border:none; padding:7px 14px; border-radius:99px; font-size:0.72rem; font-weight:700; cursor:pointer; transition:all 0.2s ease; background:#f1f5f9; color:#64748b; }
+    .filter-chip:hover { background:#e2e8f0; }
+    .filter-chip.active { background:var(--brand); color:white; box-shadow:0 2px 10px rgba(112,81,148,.2); }
+
+    /* PO List */
     .po-list { display:flex; flex-direction:column; gap:10px; }
-    .po-card { background:white; border:1.5px solid #e8e4f0; border-radius:var(--radius); padding:16px 20px; box-shadow:var(--shadow); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; transition:.2s; }
-    .po-card:hover { border-color:var(--brand); }
-    .po-info h4 { margin:0 0 4px; font-size:0.9rem; }
-    .po-info .meta { font-size:0.72rem; color:#64748b; display:flex; gap:12px; flex-wrap:wrap; }
-    .po-info .meta span { display:flex; align-items:center; gap:4px; }
 
-    .status-badge { padding:4px 12px; border-radius:99px; font-size:0.65rem; font-weight:800; text-transform:uppercase; letter-spacing:0.5px; }
+    .po-card { background:white; border:1.5px solid #e8e4f0; border-radius:var(--radius); padding:16px 20px; box-shadow:var(--shadow); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; transition:all 0.3s cubic-bezier(0.4,0,0.2,1); position:relative; overflow:hidden; }
+    .po-card:hover { border-color:rgba(112,81,148,.3); box-shadow:var(--shadow-lg); transform:translateY(-2px); }
+    .po-card::before { content:''; position:absolute; left:0; top:0; bottom:0; width:4px; transition:all 0.3s; }
+    .po-card[data-status=draft]::before { background:#94a3b8; }
+    .po-card[data-status=sent]::before { background:var(--blue); }
+    .po-card[data-status=received]::before { background:var(--green); }
+    .po-card[data-status=cancelled]::before { background:var(--red); }
+    .po-card:hover::before { width:5px; }
+    .po-card:nth-child(1) { animation:fadeInUp 0.4s ease 0.15s both; }
+    .po-card:nth-child(2) { animation:fadeInUp 0.4s ease 0.2s both; }
+    .po-card:nth-child(3) { animation:fadeInUp 0.4s ease 0.25s both; }
+    .po-card:nth-child(n+4) { animation:fadeInUp 0.4s ease 0.3s both; }
+
+    .po-info h4 { margin:0 0 6px; font-size:0.9rem; color:#1e293b; display:flex; align-items:center; gap:8px; }
+    .po-info .meta { font-size:0.72rem; color:#64748b; display:flex; gap:14px; flex-wrap:wrap; }
+    .po-info .meta span { display:flex; align-items:center; gap:5px; transition:color 0.2s; }
+    .po-info .meta span:hover { color:#1e293b; }
+
+    .status-badge { padding:4px 12px; border-radius:99px; font-size:0.62rem; font-weight:800; text-transform:uppercase; letter-spacing:0.5px; transition:all 0.2s; }
     .status-draft { background:#f1f5f9; color:#475569; }
-    .status-sent { background:#eff6ff; color:#2563eb; }
-    .status-received { background:#ecfdf5; color:#059669; }
-    .status-cancelled { background:#fef2f2; color:#dc2626; }
+    .status-sent { background:var(--blue-light); color:#2563eb; }
+    .status-received { background:var(--green-light); color:#059669; }
+    .status-cancelled { background:var(--red-light); color:#dc2626; }
 
-    .po-actions { display:flex; gap:6px; }
-    .btn-sm { border:none; padding:6px 12px; border-radius:6px; font-size:0.7rem; font-weight:700; cursor:pointer; display:flex; align-items:center; gap:4px; text-decoration:none; }
+    .po-actions { display:flex; gap:6px; align-items:center; }
+    .btn-sm { border:none; padding:6px 12px; border-radius:7px; font-size:0.7rem; font-weight:700; cursor:pointer; display:flex; align-items:center; gap:4px; text-decoration:none; transition:all 0.2s ease; }
     .btn-view { background:var(--brand-light); color:var(--brand); }
+    .btn-view:hover { background:var(--brand); color:white; transform:translateY(-1px); }
     .btn-edit-sm { background:#f1f5f9; color:#475569; }
-    .btn-delete-sm { background:#fef2f2; color:#ef4444; }
-    .empty-state { text-align:center; padding:60px 20px; color:#94a3b8; }
-    .empty-state i { font-size:3rem; margin-bottom:12px; opacity:0.3; }
+    .btn-edit-sm:hover { background:#e2e8f0; transform:translateY(-1px); }
+    .btn-delete-sm { background:var(--red-light); color:var(--red); }
+    .btn-delete-sm:hover { background:#fecaca; transform:translateY(-1px); }
+    .btn-duplicate { background:var(--blue-light); color:var(--blue); }
+    .btn-duplicate:hover { background:#dbeafe; transform:translateY(-1px); }
+
+    /* Empty State */
+    .empty-state { text-align:center; padding:60px 20px; color:#94a3b8; animation:fadeInUp 0.5s ease both; }
+    .empty-state .empty-icon { width:80px; height:80px; background:var(--brand-light); border-radius:50%; display:flex; align-items:center; justify-content:center; margin:0 auto 16px; font-size:1.8rem; color:var(--brand); animation:pulse 2s ease infinite; }
+    .empty-state h3 { font-size:1rem; color:#475569; margin:0 0 6px; }
+    .empty-state p { font-size:0.82rem; margin:0; }
+
+    @media (max-width:600px) {
+        .stats-row { grid-template-columns:repeat(2,1fr); }
+        .po-card { flex-direction:column; align-items:flex-start; }
+        .po-actions { width:100%; justify-content:flex-end; }
+    }
 </style>
 
 <div class="po-wrapper">
+    <!-- Header -->
     <div class="page-header">
-        <h2><i class="fas fa-file-invoice" style="color:var(--brand);margin-right:8px;"></i>Purchase Orders</h2>
-        <a href="/purchase_order/new" class="btn-add"><i class="fas fa-plus"></i> New Purchase Order</a>
+        <h2><span class="icon-wrap"><i class="fas fa-file-invoice"></i></span> Purchase Orders</h2>
+        <a href="/purchase_order/new" class="btn-add"><i class="fas fa-plus"></i> New Order</a>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats-row">
+        <div class="stat-card" onclick="filterByStatus('all')" id="statAll">
+            <div class="stat-dot purple"></div>
+            <div class="stat-icon purple"><i class="fas fa-layer-group"></i></div>
+            <div class="stat-label">All Orders</div>
+            <div class="stat-value">{{ orders|length }}</div>
+        </div>
+        <div class="stat-card" onclick="filterByStatus('draft')" id="statDraft">
+            <div class="stat-dot orange"></div>
+            <div class="stat-icon orange"><i class="fas fa-file-pen"></i></div>
+            <div class="stat-label">Draft</div>
+            <div class="stat-value">{{ draft_count }}</div>
+        </div>
+        <div class="stat-card" onclick="filterByStatus('sent')" id="statSent">
+            <div class="stat-dot blue"></div>
+            <div class="stat-icon blue"><i class="fas fa-paper-plane"></i></div>
+            <div class="stat-label">Sent</div>
+            <div class="stat-value">{{ sent_count }}</div>
+        </div>
+        <div class="stat-card" onclick="filterByStatus('received')" id="statReceived">
+            <div class="stat-dot green"></div>
+            <div class="stat-icon green"><i class="fas fa-check-circle"></i></div>
+            <div class="stat-label">Received</div>
+            <div class="stat-value">{{ received_count }}</div>
+        </div>
+    </div>
+
+    <!-- Toolbar -->
+    <div class="toolbar">
+        <div class="search-box">
+            <i class="fas fa-search"></i>
+            <input type="text" id="searchInput" placeholder="Search by order #, supplier, or item..." oninput="filterOrders()">
+        </div>
+        <div class="filter-chips">
+            <button class="filter-chip active" data-filter="all" onclick="filterByStatus('all')">All</button>
+            <button class="filter-chip" data-filter="draft" onclick="filterByStatus('draft')"><i class="fas fa-file-pen" style="font-size:0.6rem;"></i> Draft</button>
+            <button class="filter-chip" data-filter="sent" onclick="filterByStatus('sent')"><i class="fas fa-paper-plane" style="font-size:0.6rem;"></i> Sent</button>
+            <button class="filter-chip" data-filter="received" onclick="filterByStatus('received')"><i class="fas fa-check-circle" style="font-size:0.6rem;"></i> Received</button>
+            <button class="filter-chip" data-filter="cancelled" onclick="filterByStatus('cancelled')"><i class="fas fa-times-circle" style="font-size:0.6rem;"></i> Cancelled</button>
+        </div>
     </div>
 
     {% if orders %}
-    <div class="po-list">
+    <div class="po-list" id="poList">
         {% for o in orders %}
-        <div class="po-card">
+        <div class="po-card" data-status="{{ o.status }}" data-search="{{ o.order_number|lower }} {{ (o.supplier.name if o.supplier else '')|lower }} {% for i in o.items %}{{ i.product_name|lower }} {% endfor %}">
             <div class="po-info">
                 <h4>{{ o.order_number }}
                     <span class="status-badge status-{{ o.status }}">{{ o.status|upper }}</span>
@@ -6310,15 +6646,13 @@ TEMPLATES["purchase_orders.html"] = """
                     <span><i class="fas fa-truck" style="color:var(--brand);"></i> {{ o.supplier.name if o.supplier else 'No Supplier' }}</span>
                     <span><i class="fas fa-box" style="color:var(--orange);"></i> {{ o.items|length }} item(s)</span>
                     <span><i class="fas fa-calendar" style="color:var(--blue);"></i> {{ o.date_created.strftime('%b %d, %Y') }}</span>
-                    <span style="font-weight:700;color:var(--green);">₱{{ "{:,.2f}".format(order_totals.get(o.id, 0)) }}</span>
+                    <span style="font-weight:700;color:var(--green);"><i class="fas fa-coins"></i> ₱{{ "{:,.2f}".format(order_totals.get(o.id, 0)) }}</span>
                 </div>
             </div>
             <div class="po-actions">
                 <a href="/purchase_order/{{ o.id }}" class="btn-sm btn-view"><i class="fas fa-eye"></i> View</a>
                 {% if o.status == 'draft' %}
                 <a href="/purchase_order/{{ o.id }}/edit" class="btn-sm btn-edit-sm"><i class="fas fa-pen"></i> Edit</a>
-                {% endif %}
-                {% if o.status == 'draft' %}
                 <form method="POST" action="/purchase_order/{{ o.id }}/delete" onsubmit="return confirm('Delete {{ o.order_number }}?')" style="display:inline;">
                     <button class="btn-sm btn-delete-sm" type="submit"><i class="fas fa-trash"></i></button>
                 </form>
@@ -6329,11 +6663,50 @@ TEMPLATES["purchase_orders.html"] = """
     </div>
     {% else %}
     <div class="empty-state">
-        <i class="fas fa-file-invoice"></i>
-        <p>No purchase orders yet. Create your first one to start tracking purchases.</p>
+        <div class="empty-icon"><i class="fas fa-file-invoice"></i></div>
+        <h3>No Purchase Orders</h3>
+        <p>Create your first purchase order to start tracking purchases.</p>
     </div>
     {% endif %}
 </div>
+
+<script>
+let currentFilter = 'all';
+
+function filterByStatus(status) {
+    currentFilter = status;
+    // Update chips
+    document.querySelectorAll('.filter-chip').forEach(c => c.classList.toggle('active', c.dataset.filter === status));
+    // Update stat cards
+    document.querySelectorAll('.stat-card').forEach(c => c.classList.remove('active'));
+    const statMap = {all:'statAll', draft:'statDraft', sent:'statSent', received:'statReceived'};
+    if (statMap[status]) document.getElementById(statMap[status]).classList.add('active');
+    applyFilters();
+}
+
+function filterOrders() {
+    applyFilters();
+}
+
+function applyFilters() {
+    const q = document.getElementById('searchInput').value.toLowerCase();
+    document.querySelectorAll('.po-card').forEach(card => {
+        const matchStatus = currentFilter === 'all' || card.dataset.status === currentFilter;
+        const matchSearch = !q || card.dataset.search.includes(q);
+        const show = matchStatus && matchSearch;
+        card.style.display = show ? '' : 'none';
+        if (show) card.style.animation = 'fadeInUp 0.3s ease both';
+    });
+}
+
+// Ctrl+K shortcut
+document.addEventListener('keydown', function(e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        document.getElementById('searchInput').focus();
+    }
+});
+</script>
 {% endblock %}
 """
 
@@ -6344,52 +6717,101 @@ TEMPLATES["purchase_order_form.html"] = """
 {% extends "base.html" %}
 {% block content %}
 <style>
-    :root { --brand:#705194; --brand-light:#f3eeff; --green:#10b981; --red:#ef4444; --orange:#f59e0b; --blue:#3b82f6; --radius:16px; --shadow:0 2px 10px rgba(112,81,148,.05); }
-    .pof-wrapper { max-width:900px; margin:0 auto; padding:10px; }
-    .page-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:12px; }
-    .page-header h2 { margin:0; font-size:1.15rem; font-weight:800; color:#1e293b; }
-    .btn-back { background:#f1f5f9; color:#475569; border:none; padding:8px 16px; border-radius:8px; font-weight:700; cursor:pointer; font-size:0.8rem; text-decoration:none; display:flex; align-items:center; gap:6px; }
+    :root { --brand:#705194; --brand-light:#f3eeff; --brand-dark:#5a3f7a; --green:#10b981; --green-light:#ecfdf5; --red:#ef4444; --red-light:#fef2f2; --orange:#f59e0b; --orange-light:#fffbeb; --blue:#3b82f6; --blue-light:#eff6ff; --navy:#162135; --radius:16px; --radius-sm:10px; --shadow:0 2px 10px rgba(112,81,148,.05); --shadow-lg:0 8px 30px rgba(112,81,148,.1); }
 
-    .form-card { background:white; border:1.5px solid #e8e4f0; border-radius:var(--radius); padding:20px; box-shadow:var(--shadow); margin-bottom:16px; }
-    .form-card h3 { margin:0 0 14px; font-size:0.85rem; font-weight:800; text-transform:uppercase; color:#475569; letter-spacing:0.5px; border-bottom:1px solid #e8e4f0; padding-bottom:10px; }
+    /* Animations */
+    @keyframes fadeInUp { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:translateY(0); } }
+    @keyframes scaleIn { from { opacity:0; transform:scale(0.95); } to { opacity:1; transform:scale(1); } }
+    @keyframes slideInRow { from { opacity:0; transform:translateX(-10px); } to { opacity:1; transform:translateX(0); } }
+    @keyframes shimmer { 0% { background-position:-200% 0; } 100% { background-position:200% 0; } }
+    @keyframes deleteRow { to { opacity:0; transform:translateX(20px); height:0; padding:0; margin:0; } }
+
+    .pof-wrapper { max-width:920px; margin:0 auto; padding:10px; }
+
+    /* Header */
+    .page-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:12px; animation:fadeInUp 0.4s ease both; }
+    .page-header h2 { margin:0; font-size:1.15rem; font-weight:800; color:#1e293b; display:flex; align-items:center; gap:10px; }
+    .page-header h2 .icon-wrap { width:36px; height:36px; background:linear-gradient(135deg,var(--brand),var(--brand-dark)); border-radius:10px; display:flex; align-items:center; justify-content:center; color:white; font-size:0.85rem; box-shadow:0 4px 14px rgba(112,81,148,.3); }
+    .btn-back { background:white; color:#475569; border:1.5px solid #e8e4f0; padding:8px 16px; border-radius:var(--radius-sm); font-weight:700; cursor:pointer; font-size:0.8rem; text-decoration:none; display:flex; align-items:center; gap:6px; transition:all 0.25s; }
+    .btn-back:hover { border-color:var(--brand); color:var(--brand); transform:translateX(-2px); }
+
+    /* Form Cards */
+    .form-card { background:white; border:1.5px solid #e8e4f0; border-radius:var(--radius); padding:22px; box-shadow:var(--shadow); margin-bottom:16px; transition:all 0.3s ease; animation:fadeInUp 0.4s ease 0.1s both; }
+    .form-card:hover { box-shadow:var(--shadow-lg); }
+    .form-card:nth-child(2) { animation-delay:0.15s; }
+    .form-card h3 { margin:0 0 16px; font-size:0.82rem; font-weight:800; text-transform:uppercase; color:#475569; letter-spacing:0.5px; border-bottom:1px solid #f1f5f9; padding-bottom:12px; display:flex; align-items:center; gap:8px; }
+    .form-card h3 i { color:var(--brand); }
     .form-row { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
     .form-group { flex:1; min-width:200px; margin-bottom:0; }
-    .form-group label { display:block; font-size:0.7rem; font-weight:700; color:#475569; text-transform:uppercase; margin-bottom:4px; }
-    .form-group select, .form-group input, .form-group textarea { width:100%; padding:10px; border:1.5px solid #e8e4f0; border-radius:8px; font-size:0.82rem; box-sizing:border-box; }
-    .form-group select:focus, .form-group input:focus, .form-group textarea:focus { outline:none; border-color:var(--brand); }
+    .form-group label { display:block; font-size:0.68rem; font-weight:800; color:#475569; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:5px; }
+    .form-group select, .form-group input, .form-group textarea { width:100%; padding:11px 14px; border:1.5px solid #e8e4f0; border-radius:var(--radius-sm); font-size:0.82rem; box-sizing:border-box; transition:all 0.25s ease; background:white; }
+    .form-group select:focus, .form-group input:focus, .form-group textarea:focus { outline:none; border-color:var(--brand); box-shadow:0 0 0 3px rgba(112,81,148,.1); }
+    .form-group textarea { resize:vertical; min-height:60px; }
 
     /* Item table */
-    .item-table { width:100%; border-collapse:collapse; margin-top:8px; }
-    .item-table th { background:#f1f5f9; text-align:left; padding:10px; font-size:0.68rem; color:#475569; border:1px solid #e8e4f0; text-transform:uppercase; }
-    .item-table td { padding:8px 10px; font-size:0.8rem; border:1px solid #e8e4f0; vertical-align:middle; }
-    .item-table td input { width:100%; padding:6px 8px; border:1px solid #e8e4f0; border-radius:6px; font-size:0.8rem; box-sizing:border-box; }
-    .item-table td input:focus { outline:none; border-color:var(--brand); }
+    .items-section { animation:fadeInUp 0.4s ease 0.2s both; }
+    .item-table { width:100%; border-collapse:separate; border-spacing:0; margin-top:8px; }
+    .item-table th { background:#f8f7ff; text-align:left; padding:10px 12px; font-size:0.66rem; color:#475569; border-bottom:2px solid #e8e4f0; text-transform:uppercase; letter-spacing:0.4px; font-weight:800; }
+    .item-table td { padding:8px 10px; font-size:0.8rem; border-bottom:1px solid #f1f5f9; vertical-align:middle; }
+    .item-table tbody tr { transition:all 0.2s ease; animation:slideInRow 0.3s ease both; }
+    .item-table tbody tr:hover { background:#faf9ff; }
+    .item-table td input { width:100%; padding:8px 10px; border:1.5px solid #e8e4f0; border-radius:7px; font-size:0.8rem; box-sizing:border-box; transition:all 0.25s; background:white; }
+    .item-table td input:focus { outline:none; border-color:var(--brand); box-shadow:0 0 0 3px rgba(112,81,148,.1); }
     .item-table td input[type=number] { text-align:center; }
-    .btn-remove-row { background:#fef2f2; color:#ef4444; border:none; width:28px; height:28px; border-radius:6px; cursor:pointer; font-size:0.8rem; display:flex; align-items:center; justify-content:center; }
+    .btn-remove-row { background:var(--red-light); color:var(--red); border:none; width:30px; height:30px; border-radius:8px; cursor:pointer; font-size:0.75rem; display:flex; align-items:center; justify-content:center; transition:all 0.2s; }
+    .btn-remove-row:hover { background:#fecaca; transform:scale(1.1); }
+    .btn-remove-row:active { transform:scale(0.95); }
 
-    .add-item-bar { display:flex; gap:8px; margin-top:12px; align-items:center; flex-wrap:wrap; }
-    .add-item-bar select, .add-item-bar input { padding:8px; border:1.5px solid #e8e4f0; border-radius:8px; font-size:0.8rem; }
-    .btn-add-item { background:var(--brand-light); color:var(--brand); border:none; padding:8px 16px; border-radius:8px; font-weight:700; cursor:pointer; font-size:0.78rem; display:flex; align-items:center; gap:4px; }
+    .add-item-bar { display:flex; gap:8px; margin-top:14px; align-items:center; flex-wrap:wrap; }
+    .add-item-bar select { padding:9px 12px; border:1.5px solid #e8e4f0; border-radius:var(--radius-sm); font-size:0.82rem; min-width:240px; transition:all 0.25s; }
+    .add-item-bar select:focus { outline:none; border-color:var(--brand); }
+    .btn-add-item { background:var(--brand-light); color:var(--brand); border:none; padding:9px 16px; border-radius:var(--radius-sm); font-weight:700; cursor:pointer; font-size:0.78rem; display:flex; align-items:center; gap:5px; transition:all 0.25s; }
+    .btn-add-item:hover { background:var(--brand); color:white; transform:translateY(-1px); }
+    .btn-add-custom { background:#f1f5f9; color:#475569; }
+    .btn-add-custom:hover { background:#e2e8f0; color:#334155; }
 
-    .total-bar { background:var(--brand-light); border:1.5px solid #e8e4f0; border-radius:var(--radius); padding:14px 20px; display:flex; justify-content:flex-end; align-items:center; gap:24px; margin-top:16px; }
-    .total-bar label { font-size:0.7rem; font-weight:800; text-transform:uppercase; color:#64748b; }
-    .total-bar .total-value { font-size:1.3rem; font-weight:900; color:var(--brand); }
+    /* Summary Stats */
+    .summary-row { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:10px; margin-top:14px; padding-top:14px; border-top:1px dashed #e8e4f0; }
+    .summary-item { text-align:center; }
+    .summary-item .s-label { font-size:0.6rem; font-weight:800; text-transform:uppercase; color:#94a3b8; letter-spacing:0.5px; }
+    .summary-item .s-value { font-size:0.9rem; font-weight:800; color:#1e293b; margin-top:2px; }
 
-    .form-actions { display:flex; gap:8px; justify-content:flex-end; margin-top:16px; }
-    .btn-draft { background:#f1f5f9; color:#475569; border:none; padding:12px 24px; border-radius:10px; font-weight:700; cursor:pointer; font-size:0.85rem; }
-    .btn-submit { background:var(--brand); color:white; border:none; padding:12px 24px; border-radius:10px; font-weight:700; cursor:pointer; font-size:0.85rem; display:flex; align-items:center; gap:6px; }
+    /* Total Bar */
+    .total-bar { background:linear-gradient(135deg,var(--brand-light),#f0ecff); border:1.5px solid rgba(112,81,148,.15); border-radius:var(--radius); padding:16px 22px; display:flex; justify-content:flex-end; align-items:center; gap:24px; margin-top:16px; transition:all 0.3s; }
+    .total-bar:hover { box-shadow:0 4px 16px rgba(112,81,148,.1); }
+    .total-bar label { font-size:0.68rem; font-weight:800; text-transform:uppercase; color:#64748b; letter-spacing:0.5px; }
+    .total-bar .total-value { font-size:1.4rem; font-weight:900; color:var(--brand); transition:all 0.3s; }
+
+    /* Action Buttons */
+    .form-actions { display:flex; gap:10px; justify-content:flex-end; margin-top:20px; animation:fadeInUp 0.4s ease 0.3s both; }
+    .btn-cancel { background:white; color:#475569; border:1.5px solid #e8e4f0; padding:12px 24px; border-radius:var(--radius-sm); font-weight:700; cursor:pointer; font-size:0.85rem; transition:all 0.25s; }
+    .btn-cancel:hover { border-color:#cbd5e1; background:#f8fafc; }
+    .btn-submit { background:linear-gradient(135deg,var(--brand),var(--brand-dark)); color:white; border:none; padding:12px 28px; border-radius:var(--radius-sm); font-weight:700; cursor:pointer; font-size:0.85rem; display:flex; align-items:center; gap:7px; transition:all 0.25s; box-shadow:0 4px 14px rgba(112,81,148,.25); position:relative; overflow:hidden; }
+    .btn-submit:hover { transform:translateY(-2px); box-shadow:0 6px 20px rgba(112,81,148,.35); }
+    .btn-submit:active { transform:translateY(0) scale(0.97); }
+    .btn-submit::after { content:''; position:absolute; inset:0; background:linear-gradient(90deg,transparent,rgba(255,255,255,.12),transparent); background-size:200% 100%; animation:shimmer 3s infinite; }
+
+    /* No items placeholder */
+    .no-items { text-align:center; padding:30px 20px; color:#94a3b8; font-size:0.82rem; }
+    .no-items i { font-size:1.8rem; opacity:0.3; margin-bottom:8px; display:block; }
+
+    @media (max-width:600px) {
+        .form-card { padding:16px; }
+        .add-item-bar { flex-direction:column; }
+        .add-item-bar select { min-width:100%; }
+    }
 </style>
 
 <div class="pof-wrapper">
     <div class="page-header">
-        <h2>{% if order %}Edit {{ order.order_number }}{% else %}New Purchase Order{% endif %}</h2>
+        <h2><span class="icon-wrap"><i class="fas fa-file-pen"></i></span> {% if order %}Edit {{ order.order_number }}{% else %}New Purchase Order{% endif %}</h2>
         <a href="/purchase_orders" class="btn-back"><i class="fas fa-arrow-left"></i> Back to Orders</a>
     </div>
 
     <form id="poForm" method="POST" action="{% if order %}/purchase_order/{{ order.id }}/update{% else %}/purchase_order/create{% endif %}">
         <!-- Order Details -->
         <div class="form-card">
-            <h3><i class="fas fa-info-circle" style="color:var(--brand);margin-right:6px;"></i>Order Details</h3>
+            <h3><i class="fas fa-info-circle"></i> Order Details</h3>
             <div class="form-row">
                 <div class="form-group">
                     <label>Supplier / Destination *</label>
@@ -6410,42 +6832,59 @@ TEMPLATES["purchase_order_form.html"] = """
         </div>
 
         <!-- Items -->
-        <div class="form-card">
-            <h3><i class="fas fa-boxes-stacked" style="color:var(--orange);margin-right:6px;"></i>Order Items</h3>
+        <div class="form-card items-section">
+            <h3><i class="fas fa-boxes-stacked"></i> Order Items <span id="itemCount" style="margin-left:auto;font-size:0.7rem;color:var(--brand);font-weight:700;"></span></h3>
 
             <!-- Quick add from product catalog -->
             <div class="add-item-bar">
-                <select id="productSelect" style="min-width:220px;">
-                    <option value="">-- Add from catalog --</option>
+                <select id="productSelect">
+                    <option value="">-- Add from product catalog --</option>
                     {% for p in products %}
-                    <option value="{{ p.id }}" data-name="{{ p.name }}" data-flavor="{{ p.flavor or '' }}" data-category="{{ p.type or '' }}" data-cost="{{ p.cost or 0 }}">{{ p.name }} {% if p.flavor %}({{ p.flavor }}){% endif %}</option>
+                    <option value="{{ p.id }}" data-name="{{ p.name }}" data-flavor="{{ p.flavor or '' }}" data-category="{{ p.type or '' }}" data-cost="{{ p.cost or 0 }}" data-qty="{{ p.qty or 0 }}">{{ p.name }} {% if p.flavor %}({{ p.flavor }}){% endif %} — Stock: {{ p.qty or 0 }}</option>
                     {% endfor %}
                 </select>
                 <button type="button" class="btn-add-item" onclick="addFromCatalog()"><i class="fas fa-plus"></i> Add Product</button>
-                <button type="button" class="btn-add-item" onclick="addCustomRow()" style="background:#f1f5f9;color:#475569;"><i class="fas fa-pen"></i> Add Custom Item</button>
+                <button type="button" class="btn-add-item btn-add-custom" onclick="addCustomRow()"><i class="fas fa-pen"></i> Custom Item</button>
             </div>
 
             <div style="overflow-x:auto;margin-top:12px;">
                 <table class="item-table" id="itemsTable">
                     <thead>
                         <tr>
-                            <th style="width:30px;">#</th>
+                            <th style="width:35px;">#</th>
                             <th>Product Name</th>
                             <th>Flavor</th>
                             <th>Category</th>
                             <th style="width:90px;text-align:center;">Qty</th>
-                            <th style="width:110px;text-align:right;">Unit Cost</th>
-                            <th style="width:110px;text-align:right;">Line Total</th>
+                            <th style="width:115px;text-align:right;">Unit Cost</th>
+                            <th style="width:115px;text-align:right;">Line Total</th>
                             <th style="width:40px;"></th>
                         </tr>
                     </thead>
                     <tbody id="itemsBody">
                     </tbody>
                 </table>
+                <div class="no-items" id="noItemsMsg"><i class="fas fa-box-open"></i>No items added yet. Use the catalog above or add a custom item.</div>
+            </div>
+
+            <!-- Inline Summary -->
+            <div class="summary-row" id="summaryRow" style="display:none;">
+                <div class="summary-item">
+                    <div class="s-label">Total Items</div>
+                    <div class="s-value" id="summaryItems">0</div>
+                </div>
+                <div class="summary-item">
+                    <div class="s-label">Total Qty</div>
+                    <div class="s-value" id="summaryQty">0</div>
+                </div>
+                <div class="summary-item">
+                    <div class="s-label">Avg Unit Cost</div>
+                    <div class="s-value" id="summaryAvg">₱0.00</div>
+                </div>
             </div>
 
             <div class="total-bar">
-                <label>Total Estimated Cost</label>
+                <label>Estimated Total Cost</label>
                 <div class="total-value" id="grandTotal">₱0.00</div>
             </div>
         </div>
@@ -6453,7 +6892,7 @@ TEMPLATES["purchase_order_form.html"] = """
         <input type="hidden" name="items" id="itemsInput">
 
         <div class="form-actions">
-            <button type="button" class="btn-draft" onclick="window.location='/purchase_orders'">Cancel</button>
+            <button type="button" class="btn-cancel" onclick="window.location='/purchase_orders'">Cancel</button>
             <button type="submit" class="btn-submit" onclick="prepareSubmit()"><i class="fas fa-save"></i> {% if order %}Update Order{% else %}Save as Draft{% endif %}</button>
         </div>
     </form>
@@ -6476,18 +6915,30 @@ function addRow(productId, name, flavor, category, qty, cost) {
     const tr = document.createElement('tr');
     tr.dataset.row = rowCounter;
     tr.innerHTML = `
-        <td style="text-align:center;color:#94a3b8;font-size:0.7rem;">${rowCounter}</td>
+        <td style="text-align:center;color:#94a3b8;font-size:0.7rem;font-weight:700;">${rowCounter}</td>
         <td><input type="text" name="product_name" value="${name || ''}" placeholder="Item name" required></td>
         <td><input type="text" name="flavor" value="${flavor || ''}" placeholder="Flavor"></td>
         <td><input type="text" name="category" value="${category || ''}" placeholder="Category"></td>
-        <td><input type="number" name="qty_ordered" value="${qty || 1}" min="1" onchange="recalcTotal()" onclick="this.select()" style="text-align:center;"></td>
-        <td><input type="number" name="unit_cost" value="${cost || 0}" min="0" step="0.01" onchange="recalcTotal()" onclick="this.select()" style="text-align:right;"></td>
+        <td><input type="number" name="qty_ordered" value="${qty || 1}" min="1" oninput="recalcTotal()" onclick="this.select()" style="text-align:center;"></td>
+        <td><input type="number" name="unit_cost" value="${cost || 0}" min="0" step="0.01" oninput="recalcTotal()" onclick="this.select()" style="text-align:right;"></td>
         <td style="text-align:right;font-weight:700;color:var(--brand);" class="line-total">₱${((qty || 1) * (cost || 0)).toFixed(2)}</td>
-        <td><button type="button" class="btn-remove-row" onclick="this.closest('tr').remove(); renumberRows(); recalcTotal();"><i class="fas fa-times"></i></button></td>
+        <td><button type="button" class="btn-remove-row" onclick="removeRow(this)"><i class="fas fa-times"></i></button></td>
     `;
     tr.dataset.productId = productId || '';
     tbody.appendChild(tr);
+    updateNoItems();
     recalcTotal();
+}
+
+function removeRow(btn) {
+    const tr = btn.closest('tr');
+    tr.style.animation = 'deleteRow 0.3s ease forwards';
+    setTimeout(() => {
+        tr.remove();
+        renumberRows();
+        updateNoItems();
+        recalcTotal();
+    }, 280);
 }
 
 function addFromCatalog() {
@@ -6516,16 +6967,31 @@ function renumberRows() {
     });
 }
 
+function updateNoItems() {
+    const hasItems = document.querySelectorAll('#itemsBody tr').length > 0;
+    document.getElementById('noItemsMsg').style.display = hasItems ? 'none' : '';
+    document.getElementById('summaryRow').style.display = hasItems ? '' : 'none';
+    document.getElementById('itemCount').textContent = hasItems ? document.querySelectorAll('#itemsBody tr').length + ' item(s)' : '';
+}
+
 function recalcTotal() {
-    let grand = 0;
+    let grand = 0, totalQty = 0, costSum = 0, count = 0;
     document.querySelectorAll('#itemsBody tr').forEach(tr => {
         const qty = parseFloat(tr.querySelector('input[name=qty_ordered]').value) || 0;
         const cost = parseFloat(tr.querySelector('input[name=unit_cost]').value) || 0;
         const lineTotal = qty * cost;
         tr.querySelector('.line-total').textContent = '₱' + lineTotal.toFixed(2);
         grand += lineTotal;
+        totalQty += qty;
+        if (cost > 0) { costSum += cost; count++; }
     });
-    document.getElementById('grandTotal').textContent = '₱' + grand.toFixed(2);
+    const el = document.getElementById('grandTotal');
+    el.textContent = '₱' + grand.toFixed(2);
+    el.style.transform = 'scale(1.05)';
+    setTimeout(() => el.style.transform = '', 200);
+    document.getElementById('summaryItems').textContent = count || document.querySelectorAll('#itemsBody tr').length;
+    document.getElementById('summaryQty').textContent = totalQty;
+    document.getElementById('summaryAvg').textContent = count > 0 ? '₱' + (costSum/count).toFixed(2) : '₱0.00';
 }
 
 function prepareSubmit() {
@@ -6555,65 +7021,114 @@ TEMPLATES["purchase_order_detail.html"] = """
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
 <style>
-    :root { --brand:#705194; --brand-light:#f3eeff; --green:#10b981; --red:#ef4444; --orange:#f59e0b; --blue:#3b82f6; --radius:16px; --shadow:0 2px 10px rgba(112,81,148,.05); --navy:#162135; }
-    .pod-wrapper { max-width:900px; margin:0 auto; padding:10px; }
+    :root { --brand:#705194; --brand-light:#f3eeff; --brand-dark:#5a3f7a; --green:#10b981; --green-light:#ecfdf5; --red:#ef4444; --red-light:#fef2f2; --orange:#f59e0b; --orange-light:#fffbeb; --blue:#3b82f6; --blue-light:#eff6ff; --navy:#162135; --radius:16px; --radius-sm:10px; --shadow:0 2px 10px rgba(112,81,148,.05); --shadow-lg:0 8px 30px rgba(112,81,148,.1); }
 
-    .pod-controls { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:8px; }
-    .btn-back { background:#f1f5f9; color:#475569; border:none; padding:8px 16px; border-radius:8px; font-weight:700; cursor:pointer; font-size:0.8rem; text-decoration:none; display:flex; align-items:center; gap:6px; }
-    .btn-group { display:flex; gap:6px; flex-wrap:wrap; }
-    .btn-action { border:none; padding:8px 16px; border-radius:8px; font-weight:700; cursor:pointer; font-size:0.78rem; display:flex; align-items:center; gap:5px; color:white; }
-    .btn-send { background:var(--blue); }
-    .btn-receive { background:var(--green); }
-    .btn-cancel { background:var(--red); }
-    .btn-edit { background:var(--orange); }
-    .btn-print { background:#475569; }
-    .btn-img { background:var(--brand); }
+    /* Animations */
+    @keyframes fadeInUp { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:translateY(0); } }
+    @keyframes scaleIn { from { opacity:0; transform:scale(0.95); } to { opacity:1; transform:scale(1); } }
+    @keyframes shimmer { 0% { background-position:-200% 0; } 100% { background-position:200% 0; } }
+    @keyframes pulse { 0%,100% { transform:scale(1); } 50% { transform:scale(1.04); } }
+    @keyframes slideRight { from { opacity:0; transform:translateX(-10px); } to { opacity:1; transform:translateX(0); } }
+    @keyframes statusPulse { 0%,100% { box-shadow:0 0 0 0 rgba(112,81,148,.3); } 50% { box-shadow:0 0 0 6px rgba(112,81,148,0); } }
 
-    .status-badge { padding:4px 14px; border-radius:99px; font-size:0.68rem; font-weight:800; text-transform:uppercase; letter-spacing:0.5px; }
-    .status-draft { background:#f1f5f9; color:#475569; }
-    .status-sent { background:#eff6ff; color:#2563eb; }
-    .status-received { background:#ecfdf5; color:#059669; }
-    .status-cancelled { background:#fef2f2; color:#dc2626; }
+    .pod-wrapper { max-width:920px; margin:0 auto; padding:10px; }
+
+    /* Controls */
+    .pod-controls { display:flex; justify-content:space-between; align-items:center; margin-bottom:18px; flex-wrap:wrap; gap:10px; animation:fadeInUp 0.4s ease both; }
+    .btn-back { background:white; color:#475569; border:1.5px solid #e8e4f0; padding:9px 18px; border-radius:var(--radius-sm); font-weight:700; cursor:pointer; font-size:0.82rem; text-decoration:none; display:flex; align-items:center; gap:7px; transition:all 0.25s; }
+    .btn-back:hover { border-color:var(--brand); color:var(--brand); transform:translateX(-2px); }
+    .btn-group { display:flex; gap:7px; flex-wrap:wrap; }
+    .btn-action { border:none; padding:9px 18px; border-radius:var(--radius-sm); font-weight:700; cursor:pointer; font-size:0.78rem; display:flex; align-items:center; gap:6px; color:white; transition:all 0.25s ease; position:relative; overflow:hidden; }
+    .btn-action::after { content:''; position:absolute; inset:0; background:linear-gradient(90deg,transparent,rgba(255,255,255,.1),transparent); background-size:200% 100%; }
+    .btn-action:hover { transform:translateY(-2px); box-shadow:0 4px 14px rgba(0,0,0,.15); }
+    .btn-action:active { transform:translateY(0) scale(0.97); }
+    .btn-send { background:linear-gradient(135deg,var(--blue),#1d4ed8); }
+    .btn-receive { background:linear-gradient(135deg,var(--green),#059669); }
+    .btn-cancel-action { background:linear-gradient(135deg,var(--red),#dc2626); }
+    .btn-edit { background:linear-gradient(135deg,var(--orange),#d97706); }
+    .btn-print { background:linear-gradient(135deg,#475569,var(--navy)); }
+    .btn-img { background:linear-gradient(135deg,var(--brand),var(--brand-dark)); }
+    .btn-duplicate { background:linear-gradient(135deg,#64748b,#475569); }
+
+    /* Status Timeline */
+    .status-timeline { display:flex; align-items:center; gap:0; margin-bottom:20px; padding:16px 20px; background:white; border:1.5px solid #e8e4f0; border-radius:var(--radius); box-shadow:var(--shadow); animation:fadeInUp 0.4s ease 0.1s both; }
+    .status-step { display:flex; align-items:center; gap:8px; flex:1; position:relative; }
+    .status-step .step-dot { width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:0.65rem; background:#f1f5f9; color:#94a3b8; transition:all 0.3s; }
+    .status-step .step-dot.completed { background:var(--green); color:white; animation:statusPulse 2s infinite; }
+    .status-step .step-dot.current { background:var(--brand); color:white; animation:statusPulse 2s infinite; }
+    .status-step .step-label { font-size:0.62rem; font-weight:800; text-transform:uppercase; color:#94a3b8; letter-spacing:0.5px; }
+    .status-step .step-label.completed { color:var(--green); }
+    .status-step .step-label.current { color:var(--brand); }
+    .status-step .step-connector { flex:1; height:2px; background:#e2e8f0; margin:0 8px; transition:all 0.3s; }
+    .status-step .step-connector.completed { background:var(--green); }
 
     /* Document */
-    #capture-area { background:white; border:1.5px solid #e8e4f0; border-radius:var(--radius); padding:5vw; position:relative; }
-    .doc-header { text-align:center; border-bottom:2px solid var(--navy); padding-bottom:18px; margin-bottom:24px; }
-    .doc-header h2 { margin:0; font-size:clamp(1rem,4vw,1.4rem); font-weight:800; letter-spacing:1px; }
-    .doc-header .sub { font-size:0.75rem; color:#64748b; margin-top:4px; }
-    .doc-header .po-number { font-size:0.9rem; font-weight:700; color:var(--brand); margin-top:8px; }
-    .doc-header .po-date { font-size:0.72rem; color:#94a3b8; margin-top:2px; }
+    #capture-area { background:white; border:1.5px solid #e8e4f0; border-radius:var(--radius); padding:5vw; position:relative; animation:fadeInUp 0.4s ease 0.15s both; }
+    .doc-header { text-align:center; border-bottom:2px solid var(--navy); padding-bottom:20px; margin-bottom:26px; }
+    .doc-header h2 { margin:0; font-size:clamp(1rem,4vw,1.4rem); font-weight:800; letter-spacing:1px; color:var(--navy); }
+    .doc-header .sub { font-size:0.75rem; color:#64748b; margin-top:5px; }
+    .doc-header .po-number { font-size:0.95rem; font-weight:800; color:var(--brand); margin-top:10px; display:flex; align-items:center; justify-content:center; gap:8px; }
+    .doc-header .po-date { font-size:0.72rem; color:#94a3b8; margin-top:3px; }
 
-    .supplier-box { background:var(--brand-light); border:1px solid #e8e4f0; border-radius:10px; padding:14px 18px; margin-bottom:20px; }
-    .supplier-box h4 { margin:0 0 4px; font-size:0.8rem; font-weight:800; text-transform:uppercase; color:#475569; }
-    .supplier-box .detail { font-size:0.78rem; color:#1e293b; margin:2px 0; }
+    .status-badge { padding:5px 14px; border-radius:99px; font-size:0.62rem; font-weight:800; text-transform:uppercase; letter-spacing:0.5px; display:inline-flex; align-items:center; gap:4px; }
+    .status-draft { background:#f1f5f9; color:#475569; }
+    .status-sent { background:var(--blue-light); color:#2563eb; }
+    .status-received { background:var(--green-light); color:#059669; }
+    .status-cancelled { background:var(--red-light); color:#dc2626; }
 
-    .item-table { width:100%; border-collapse:collapse; margin-bottom:16px; }
-    .item-table th { background:#f1f5f9; text-align:left; padding:10px; font-size:0.68rem; color:#475569; border:1px solid #e8e4f0; text-transform:uppercase; }
-    .item-table td { padding:10px; font-size:0.8rem; border:1px solid #e8e4f0; vertical-align:middle; }
+    /* Supplier Box */
+    .supplier-box { background:linear-gradient(135deg,var(--brand-light),#f0ecff); border:1px solid rgba(112,81,148,.12); border-radius:var(--radius); padding:16px 20px; margin-bottom:22px; transition:all 0.3s; }
+    .supplier-box:hover { box-shadow:0 4px 16px rgba(112,81,148,.08); }
+    .supplier-box h4 { margin:0 0 6px; font-size:0.78rem; font-weight:800; text-transform:uppercase; color:#475569; letter-spacing:0.5px; display:flex; align-items:center; gap:6px; }
+    .supplier-box h4 i { color:var(--brand); }
+    .supplier-box .detail { font-size:0.78rem; color:#1e293b; margin:3px 0; display:flex; align-items:center; gap:6px; }
+    .supplier-box .detail i { color:var(--brand); font-size:0.7rem; width:14px; }
+
+    /* Item Table */
+    .item-table { width:100%; border-collapse:separate; border-spacing:0; margin-bottom:16px; }
+    .item-table th { background:#f8f7ff; text-align:left; padding:11px 14px; font-size:0.66rem; color:#475569; border-bottom:2px solid #e8e4f0; text-transform:uppercase; letter-spacing:0.4px; font-weight:800; }
+    .item-table td { padding:11px 14px; font-size:0.8rem; border-bottom:1px solid #f1f5f9; vertical-align:middle; transition:all 0.2s; }
+    .item-table tbody tr { animation:slideRight 0.3s ease both; }
+    .item-table tbody tr:hover { background:#faf9ff; }
     .item-table tbody tr:nth-child(even) { background:#fafafa; }
+    .item-table tbody tr:nth-child(even):hover { background:#faf9ff; }
 
-    .total-row { background:var(--brand-light) !important; font-weight:800; }
-    .total-row td { font-size:0.85rem !important; }
+    .total-row { background:linear-gradient(135deg,var(--brand-light),#f0ecff) !important; font-weight:800; }
+    .total-row td { font-size:0.85rem !important; border-bottom:none !important; }
 
-    .notes-box { background:#fafafa; border:1px solid #e8e4f0; border-radius:8px; padding:12px; margin-top:12px; font-size:0.78rem; color:#475569; }
-    .notes-box strong { display:block; margin-bottom:4px; font-size:0.68rem; text-transform:uppercase; color:#94a3b8; }
+    .notes-box { background:#fafafa; border:1px solid #e8e4f0; border-radius:var(--radius-sm); padding:14px 16px; margin-top:14px; font-size:0.78rem; color:#475569; }
+    .notes-box strong { display:block; margin-bottom:5px; font-size:0.66rem; text-transform:uppercase; color:#94a3b8; letter-spacing:0.5px; }
 
-    .doc-footer { margin-top:24px; padding-top:12px; border-top:1px solid #e8e4f0; font-size:0.65rem; color:#94a3b8; text-align:center; }
+    .doc-footer { margin-top:26px; padding-top:14px; border-top:1px solid #e8e4f0; font-size:0.65rem; color:#94a3b8; text-align:center; }
 
     /* Editable qty */
-    .editable-qty { display:inline-flex; align-items:center; gap:4px; }
-    .editable-qty input { width:60px; padding:4px 6px; border:1px solid #e8e4f0; border-radius:6px; text-align:center; font-size:0.8rem; font-weight:700; }
-    .editable-qty input:focus { outline:none; border-color:var(--brand); }
-    .qty-display { font-weight:700; color:var(--green); }
-    .btn-qty-save { background:var(--green); color:white; border:none; padding:3px 8px; border-radius:4px; cursor:pointer; font-size:0.65rem; font-weight:700; }
+    .editable-qty { display:inline-flex; align-items:center; gap:5px; }
+    .editable-qty input { width:58px; padding:5px 7px; border:1.5px solid #e8e4f0; border-radius:7px; text-align:center; font-size:0.8rem; font-weight:700; transition:all 0.25s; }
+    .editable-qty input:focus { outline:none; border-color:var(--brand); box-shadow:0 0 0 3px rgba(112,81,148,.1); }
+    .qty-display { font-weight:800; color:var(--green); }
+    .btn-qty-save { background:linear-gradient(135deg,var(--green),#059669); color:white; border:none; padding:4px 10px; border-radius:6px; cursor:pointer; font-size:0.62rem; font-weight:800; transition:all 0.2s; }
+    .btn-qty-save:hover { transform:translateY(-1px); box-shadow:0 2px 8px rgba(16,185,129,.3); }
+
+    /* Quick summary cards under timeline */
+    .detail-stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; margin-bottom:20px; animation:fadeInUp 0.4s ease 0.12s both; }
+    .d-stat { background:white; border:1.5px solid #e8e4f0; border-radius:var(--radius-sm); padding:12px 14px; text-align:center; box-shadow:var(--shadow); transition:all 0.2s; }
+    .d-stat:hover { transform:translateY(-2px); box-shadow:var(--shadow-lg); }
+    .d-stat .d-label { font-size:0.58rem; font-weight:800; text-transform:uppercase; color:#94a3b8; letter-spacing:0.5px; }
+    .d-stat .d-value { font-size:1.1rem; font-weight:900; color:#1e293b; margin-top:2px; }
 
     @media print {
         body * { visibility:hidden !important; }
         #capture-area, #capture-area * { visibility:visible !important; }
         #capture-area { position:fixed; top:0; left:0; width:100vw; padding:28px 32px; border:none; box-shadow:none; background:white; }
-        .pod-controls { display:none !important; }
+        .pod-controls, .status-timeline, .detail-stats { display:none !important; }
         .btn-qty-save { display:none !important; }
         .editable-qty input { border:none; background:transparent; }
+    }
+
+    @media (max-width:600px) {
+        .status-timeline { flex-wrap:wrap; gap:8px; }
+        .status-step .step-connector { display:none; }
+        .detail-stats { grid-template-columns:repeat(2,1fr); }
     }
 </style>
 
@@ -6628,7 +7143,7 @@ TEMPLATES["purchase_order_detail.html"] = """
                 <button type="submit" class="btn-action btn-send"><i class="fas fa-paper-plane"></i> Send to Supplier</button>
             </form>
             <form method="POST" action="/purchase_order/{{ order.id }}/delete" onsubmit="return confirm('Cancel this order?')" style="display:inline;">
-                <button type="submit" class="btn-action btn-cancel"><i class="fas fa-times"></i> Cancel</button>
+                <button type="submit" class="btn-action btn-cancel-action"><i class="fas fa-times"></i> Cancel</button>
             </form>
             {% elif order.status == 'sent' %}
             <form method="POST" action="/purchase_order/{{ order.id }}/status" style="display:inline;">
@@ -6637,11 +7152,61 @@ TEMPLATES["purchase_order_detail.html"] = """
             </form>
             <form method="POST" action="/purchase_order/{{ order.id }}/status" style="display:inline;">
                 <input type="hidden" name="status" value="cancelled">
-                <button type="submit" class="btn-action btn-cancel"><i class="fas fa-times"></i> Cancel</button>
+                <button type="submit" class="btn-action btn-cancel-action"><i class="fas fa-times"></i> Cancel</button>
             </form>
             {% endif %}
             <button onclick="window.print()" class="btn-action btn-print"><i class="fas fa-print"></i> Print</button>
             <button onclick="downloadPO()" class="btn-action btn-img"><i class="fas fa-image"></i> Image</button>
+        </div>
+    </div>
+
+    <!-- Status Timeline -->
+    <div class="status-timeline no-print">
+        <div class="status-step">
+            <div class="step-dot {% if order.status != 'cancelled' %}completed{% endif %}" style="{% if order.status == 'cancelled' %}background:var(--red);color:white{% endif %};">
+                <i class="fas fa-file-pen"></i>
+            </div>
+            <div class="step-label {% if order.status != 'cancelled' %}completed{% endif %}" style="{% if order.status == 'cancelled' %}color:var(--red){% endif %};">Draft</div>
+            <div class="step-connector {% if order.status in ['sent','received'] %}completed{% endif %}"></div>
+        </div>
+        <div class="status-step">
+            <div class="step-dot {% if order.status == 'sent' %}current{% elif order.status == 'received' %}completed{% elif order.status == 'cancelled' %}{% else %}{% endif %}" style="{% if order.status == 'cancelled' %}background:var(--red);color:white{% endif %};">
+                <i class="fas fa-paper-plane"></i>
+            </div>
+            <div class="step-label {% if order.status == 'sent' %}current{% elif order.status == 'received' %}completed{% endif %}" style="{% if order.status == 'cancelled' %}color:var(--red){% endif %};">Sent</div>
+            <div class="step-connector {% if order.status == 'received' %}completed{% endif %}"></div>
+        </div>
+        <div class="status-step">
+            <div class="step-dot {% if order.status == 'received' %}current{% endif %}" style="{% if order.status == 'cancelled' %}background:var(--red);color:white{% endif %};">
+                <i class="fas fa-check"></i>
+            </div>
+            <div class="step-label {% if order.status == 'received' %}current{% endif %}" style="{% if order.status == 'cancelled' %}color:var(--red){% endif %};">Received</div>
+        </div>
+    </div>
+
+    <!-- Quick Stats -->
+    <div class="detail-stats no-print">
+        {% set tc = namespace(val=0.0) %}
+        {% set tq = namespace(val=0) %}
+        {% for item in order.items %}
+        {% set _ = tc.__setattr__('val', tc.val + (item.qty_ordered * item.unit_cost)) %}
+        {% set _ = tq.__setattr__('val', tq.val + item.qty_ordered) %}
+        {% endfor %}
+        <div class="d-stat">
+            <div class="d-label">Items</div>
+            <div class="d-value">{{ order.items|length }}</div>
+        </div>
+        <div class="d-stat">
+            <div class="d-label">Total Qty</div>
+            <div class="d-value">{{ tq.val }}</div>
+        </div>
+        <div class="d-stat">
+            <div class="d-label">Total Cost</div>
+            <div class="d-value" style="color:var(--brand);">₱{{ "{:,.2f}".format(tc.val) }}</div>
+        </div>
+        <div class="d-stat">
+            <div class="d-label">Status</div>
+            <div class="d-value"><span class="status-badge status-{{ order.status }}">{{ order.status|upper }}</span></div>
         </div>
     </div>
 
@@ -6650,7 +7215,7 @@ TEMPLATES["purchase_order_detail.html"] = """
             <h2>F.L.E.X VAPE SHOP</h2>
             <div class="sub">Inventory Management System</div>
             <div class="po-number">{{ order.order_number }}
-                <span class="status-badge status-{{ order.status }}">{{ order.status|upper }}</span>
+                <span class="status-badge status-{{ order.status }}"><i class="fas fa-circle" style="font-size:0.4rem;"></i> {{ order.status|upper }}</span>
             </div>
             <div class="po-date">Created: {{ order.date_created.strftime('%B %d, %Y %I:%M %p') }}</div>
             {% if order.date_updated and order.date_updated != order.date_created %}
@@ -6660,13 +7225,13 @@ TEMPLATES["purchase_order_detail.html"] = """
 
         <!-- Supplier / Destination -->
         <div class="supplier-box">
-            <h4><i class="fas fa-truck" style="margin-right:4px;"></i> Supplier / Destination</h4>
+            <h4><i class="fas fa-truck"></i> Supplier / Destination</h4>
             {% if order.supplier %}
             <div class="detail"><strong>{{ order.supplier.name }}</strong></div>
-            {% if order.supplier.contact %}<div class="detail">{{ order.supplier.contact }}</div>{% endif %}
-            {% if order.supplier.phone %}<div class="detail"><i class="fas fa-phone" style="margin-right:4px;"></i>{{ order.supplier.phone }}</div>{% endif %}
-            {% if order.supplier.email %}<div class="detail"><i class="fas fa-envelope" style="margin-right:4px;"></i>{{ order.supplier.email }}</div>{% endif %}
-            {% if order.supplier.address %}<div class="detail"><i class="fas fa-map-marker-alt" style="margin-right:4px;"></i>{{ order.supplier.address }}</div>{% endif %}
+            {% if order.supplier.contact %}<div class="detail"><i class="fas fa-user"></i>{{ order.supplier.contact }}</div>{% endif %}
+            {% if order.supplier.phone %}<div class="detail"><i class="fas fa-phone"></i>{{ order.supplier.phone }}</div>{% endif %}
+            {% if order.supplier.email %}<div class="detail"><i class="fas fa-envelope"></i>{{ order.supplier.email }}</div>{% endif %}
+            {% if order.supplier.address %}<div class="detail"><i class="fas fa-map-marker-alt"></i>{{ order.supplier.address }}</div>{% endif %}
             {% else %}
             <div class="detail" style="color:#94a3b8;">No supplier assigned</div>
             {% endif %}
@@ -6676,7 +7241,7 @@ TEMPLATES["purchase_order_detail.html"] = """
         <table class="item-table">
             <thead>
                 <tr>
-                    <th style="width:30px;">#</th>
+                    <th style="width:35px;">#</th>
                     <th>Product Name</th>
                     <th>Flavor</th>
                     <th>Category</th>
@@ -6690,15 +7255,15 @@ TEMPLATES["purchase_order_detail.html"] = """
                 {% set total_qty = namespace(val=0) %}
                 {% for item in order.items %}
                 <tr>
-                    <td style="text-align:center;color:#94a3b8;">{{ loop.index }}</td>
+                    <td style="text-align:center;color:#94a3b8;font-weight:700;">{{ loop.index }}</td>
                     <td><strong>{{ item.product_name }}</strong></td>
-                    <td style="color:#64748b;">{{ item.flavor or '—' }}</td>
-                    <td style="color:#64748b;text-transform:capitalize;">{{ item.category or '—' }}</td>
+                    <td style="color:#64748b;">{{ item.flavor or '\u2014' }}</td>
+                    <td style="color:#64748b;text-transform:capitalize;">{{ item.category or '\u2014' }}</td>
                     <td style="text-align:center;">
                         {% if order.status == 'draft' %}
                         <div class="editable-qty">
                             <input type="number" value="{{ item.qty_ordered }}" min="1" data-item-id="{{ item.id }}" onchange="updateQty({{ item.id }}, this.value)">
-                            <button class="btn-qty-save" onclick="saveQty({{ item.id }})">Save</button>
+                            <button class="btn-qty-save" onclick="saveQty({{ item.id }})"><i class="fas fa-check"></i></button>
                         </div>
                         {% else %}
                         <span class="qty-display">{{ item.qty_ordered }}</span>
@@ -6721,7 +7286,7 @@ TEMPLATES["purchase_order_detail.html"] = """
 
         {% if order.notes %}
         <div class="notes-box">
-            <strong>Notes</strong>
+            <strong><i class="fas fa-sticky-note" style="margin-right:4px;"></i> Notes</strong>
             {{ order.notes }}
         </div>
         {% endif %}
@@ -6734,23 +7299,29 @@ TEMPLATES["purchase_order_detail.html"] = """
 
 <script>
 function updateQty(itemId, newQty) {
-    // Store pending qty change
     window['_pending_qty_' + itemId] = parseInt(newQty) || 0;
 }
 function saveQty(itemId) {
     const newQty = window['_pending_qty_' + itemId];
     if (newQty === undefined) return;
+    const btn = event.target.closest('.btn-qty-save');
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    btn.disabled = true;
     fetch('/api/purchase_order_item/' + itemId + '/qty', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({qty_ordered: newQty})
     }).then(r => r.json()).then(data => {
         if (data.success) location.reload();
-        else alert('Failed to update quantity.');
-    });
+        else { alert('Failed to update quantity.'); btn.innerHTML = '<i class="fas fa-check"></i>'; btn.disabled = false; }
+    }).catch(() => { alert('Network error.'); btn.innerHTML = '<i class="fas fa-check"></i>'; btn.disabled = false; });
 }
 async function downloadPO() {
     const el = document.getElementById('capture-area');
+    const btn = event.target.closest('.btn-action');
+    const origHTML = btn.innerHTML;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Export...';
+    btn.disabled = true;
     try {
         const canvas = await html2canvas(el, { scale:3, useCORS:true, backgroundColor:'#ffffff' });
         const link = document.createElement('a');
@@ -6758,6 +7329,7 @@ async function downloadPO() {
         link.download = 'FLEX_PO_{{ order.order_number }}.png';
         link.click();
     } catch(e) { alert('Export failed.'); }
+    finally { btn.innerHTML = origHTML; btn.disabled = false; }
 }
 </script>
 {% endblock %}
