@@ -3261,72 +3261,285 @@ TEMPLATES["reports.html"] = """
     }
 
     /* ===== PAGE SETUP ===== */
-    @page { size: A4 portrait; margin: 16mm 14mm 16mm; }
+    @page { size: A4 portrait; margin: 12mm 10mm 14mm; }
 
-    /* ===== PRINT ===== */
+    /* ===================================================================
+       PRINT LAYOUT — Inventory Audit Report
+       Visual identity: Navy command-strip header · Ledger tables ·
+       Numbered section dividers · Authorization footer
+    =================================================================== */
     @media print {
-        /* ── STEP 1: Hide every element on the page ── */
-        body * { visibility: hidden !important; }
 
-        /* ── STEP 2: Show ONLY the report document and all its children ── */
+        /* ── 0. ISOLATE THE DOCUMENT ── */
+        body * { visibility: hidden !important; }
         #report-capture-area,
         #report-capture-area * { visibility: visible !important; }
 
-        /* ── STEP 3: Pull the report out of any parent layout and pin it full-width ── */
+        /* ── 1. CANVAS: full-page, zero padding (sections manage own spacing) ── */
         #report-capture-area {
             position: fixed !important;
             top: 0 !important; left: 0 !important;
             width: 100vw !important; height: auto !important;
             margin: 0 !important;
-            padding: 24px 32px !important;
+            padding: 0 0 24px !important;
             border: none !important; box-shadow: none !important;
+            border-radius: 0 !important; background: #fff !important;
+            -webkit-print-color-adjust: exact; print-color-adjust: exact;
+        }
+
+        /* ── 2. HEADER: full-bleed navy command strip ── */
+        .doc-header {
+            background: #162135 !important;
+            color: white !important;
+            display: flex !important;
+            justify-content: space-between !important;
+            align-items: flex-start !important;
+            gap: 24px !important;
+            padding: 14px 28px 16px !important;
+            margin: 0 !important;
+            border-bottom: 4px solid #f5c842 !important;
+            flex-wrap: nowrap !important;
+            -webkit-print-color-adjust: exact; print-color-adjust: exact;
+        }
+        .brand-info h2 {
+            font-size: 1.05rem !important; font-weight: 900 !important;
+            color: #f5c842 !important; letter-spacing: 1px !important;
+            text-transform: uppercase !important; margin: 0 !important;
+        }
+        .brand-info p {
+            font-size: 0.58rem !important; color: #94a3b8 !important;
+            margin: 3px 0 0 !important; text-transform: uppercase !important;
+            letter-spacing: 0.8px !important;
+        }
+        .report-meta { text-align: right !important; }
+        .report-type-label {
+            font-size: 0.62rem !important; font-weight: 900 !important;
+            color: #f5c842 !important; text-transform: uppercase !important;
+            letter-spacing: 1.5px !important;
+        }
+        .report-date { font-size: 0.58rem !important; color: #94a3b8 !important; margin-top: 3px !important; }
+        .report-period-badge {
+            display: inline-block !important;
+            background: rgba(245,200,66,.18) !important;
+            color: #f5c842 !important;
+            border: 1px solid rgba(245,200,66,.5) !important;
+            border-radius: 2px !important;
+            font-size: 0.55rem !important; font-weight: 800 !important;
+            padding: 3px 8px !important; margin-top: 6px !important;
+            letter-spacing: 0.8px !important;
+            -webkit-print-color-adjust: exact; print-color-adjust: exact;
+        }
+
+        /* ── 3. KPI STRIP: borderless row of flat metric cells ── */
+        .report-grid {
+            display: grid !important;
+            grid-template-columns: repeat(4, 1fr) !important;
+            gap: 0 !important;
+            border-bottom: 1.5px solid #162135 !important;
+            margin: 0 !important;
             border-radius: 0 !important;
-            background: white !important;
             -webkit-print-color-adjust: exact; print-color-adjust: exact;
         }
-
-        /* ── Tables ── */
-        .table-responsive { overflow: visible !important; border: 1px solid #e2e8f0 !important; border-radius: 8px !important; }
-        .warn-table-wrap  { overflow: visible !important; }
-        .report-table, .warn-table { font-size: 0.7rem !important; min-width: unset !important; width: 100% !important; }
-        .report-table th  { background: #162135 !important; color: white !important; padding: 7px 10px !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-        .report-table td  { padding: 6px 10px !important; }
-        .warn-table th    { background: #fff1f2 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-
-        /* ── KPI grid ── */
-        .report-grid { grid-template-columns: repeat(4, 1fr) !important; gap: 10px !important; }
         .stat-card {
-            box-shadow: none !important; border: 1px solid #e2e8f0 !important;
-            padding: 12px !important; -webkit-print-color-adjust: exact; print-color-adjust: exact;
-        }
-        .stat-card .value { font-size: 1.2rem !important; }
-
-        /* ── Colour badges ── */
-        .net-pos, .net-neg, .net-zero, .cat-chip-sm, .sev-out, .sev-critical, .sev-low, .cat-perf-card {
+            background: #f8fafc !important;
+            border: none !important;
+            border-right: 1px solid #cbd5e1 !important;
+            border-radius: 0 !important;
+            padding: 10px 16px !important;
+            box-shadow: none !important;
+            text-align: center !important;
             -webkit-print-color-adjust: exact; print-color-adjust: exact;
         }
-        .net-pos  { background: #d1fae5 !important; color: #065f46 !important; }
-        .net-neg  { background: #fee2e2 !important; color: #991b1b !important; }
-        .net-zero { background: #f1f5f9 !important; color: #64748b !important; }
-        .row-positive td { background: rgba(16,185,129,.06) !important; }
-        .row-negative td { background: rgba(239,68,68,.06)  !important; }
+        .stat-card:last-child { border-right: none !important; }
+        .stat-card::before { display: none !important; }
+        .stat-card label {
+            display: block !important;
+            font-size: 0.5rem !important; color: #64748b !important;
+            font-weight: 800 !important; text-transform: uppercase !important;
+            letter-spacing: 0.6px !important; margin-bottom: 5px !important;
+        }
+        .stat-card label i { display: none !important; }
+        .stat-card .value { font-size: 1.05rem !important; font-weight: 900 !important; line-height: 1.1 !important; }
+        .stat-card .value.green  { color: #059669 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        .stat-card .value.purple { color: #5b3a8a !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        .stat-card .value.blue   { color: #1d4ed8 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        .stat-card .value.red    { color: #b91c1c !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        .stat-card .sub { font-size: 0.5rem !important; color: #94a3b8 !important; margin-top: 3px !important; }
 
-        /* ── Gross Profit card ── */
+        /* ── 4. CONTENT PADDING WRAPPER ── */
+        .section-heading,
+        .table-responsive,
+        .warn-table-wrap,
+        .sellers-grid,
+        .cat-perf-grid,
+        .doc-footer,
+        .no-warn-msg,
+        .swipe-hint,
+        p {
+            padding-left: 28px !important;
+            padding-right: 28px !important;
+        }
+
+        /* ── 5. SECTION HEADINGS: numbered ledger dividers ── */
+        .section-heading {
+            counter-increment: section-counter !important;
+            display: flex !important;
+            align-items: center !important;
+            gap: 8px !important;
+            font-size: 0.58rem !important; font-weight: 900 !important;
+            text-transform: uppercase !important; letter-spacing: 1.2px !important;
+            color: #162135 !important;
+            border-top: 1.5px solid #162135 !important;
+            border-left: none !important;
+            padding: 6px 28px !important;
+            margin: 16px 0 6px !important;
+            background: none !important;
+            page-break-after: avoid !important;
+        }
+        #report-capture-area { counter-reset: section-counter !important; }
+        .section-heading::before {
+            content: "0" counter(section-counter) !important;
+            display: inline-block !important;
+            background: #162135 !important;
+            color: #f5c842 !important;
+            font-size: 0.52rem !important; font-weight: 900 !important;
+            padding: 2px 6px !important;
+            border-radius: 2px !important;
+            letter-spacing: 0 !important;
+            -webkit-print-color-adjust: exact; print-color-adjust: exact;
+        }
+        .section-heading::after { display: none !important; }
+        .section-heading i { display: none !important; }
+
+        /* ── 6. TABLES: classic ledger with navy header rows ── */
+        .table-responsive {
+            overflow: visible !important;
+            border: 1px solid #94a3b8 !important;
+            border-radius: 0 !important;
+            margin-bottom: 6px !important;
+            padding-left: 0 !important; padding-right: 0 !important;
+        }
+        .warn-table-wrap {
+            overflow: visible !important;
+            border-radius: 0 !important;
+            border-color: #94a3b8 !important;
+            padding-left: 0 !important; padding-right: 0 !important;
+        }
+        .report-table, .warn-table {
+            font-size: 0.62rem !important;
+            min-width: unset !important; width: 100% !important;
+            border-collapse: collapse !important;
+        }
+        .report-table th {
+            background: #162135 !important; color: #ffffff !important;
+            padding: 6px 9px !important; font-size: 0.54rem !important;
+            font-weight: 800 !important; text-transform: uppercase !important;
+            letter-spacing: 0.5px !important; border: none !important;
+            white-space: nowrap !important;
+            -webkit-print-color-adjust: exact; print-color-adjust: exact;
+        }
+        .report-table td {
+            padding: 5px 9px !important;
+            border-bottom: 1px solid #e2e8f0 !important;
+            border-right: 1px solid #e8edf2 !important;
+            font-size: 0.62rem !important;
+        }
+        .report-table tbody tr:nth-child(even) td {
+            background: #f8fafc !important;
+            -webkit-print-color-adjust: exact; print-color-adjust: exact;
+        }
+        .report-table tbody tr.row-positive td {
+            background: rgba(16,185,129,.07) !important;
+            -webkit-print-color-adjust: exact; print-color-adjust: exact;
+        }
+        .report-table tbody tr.row-negative td {
+            background: rgba(239,68,68,.07) !important;
+            -webkit-print-color-adjust: exact; print-color-adjust: exact;
+        }
+        .warn-table th {
+            background: #1e293b !important; color: white !important;
+            padding: 6px 9px !important; font-size: 0.54rem !important;
+            border: none !important;
+            -webkit-print-color-adjust: exact; print-color-adjust: exact;
+        }
+        .warn-table td {
+            padding: 5px 9px !important;
+            border-bottom: 1px solid #e2e8f0 !important;
+            font-size: 0.62rem !important;
+        }
+
+        /* ── 7. NET CHANGE & STATUS BADGES ── */
+        .net-badge { border-radius: 2px !important; font-size: 0.52rem !important; padding: 2px 6px !important; }
+        .cat-chip-sm { border-radius: 2px !important; font-size: 0.5rem !important; }
+        .sev-badge   { border-radius: 2px !important; font-size: 0.52rem !important; }
+        .net-pos   { background: #d1fae5 !important; color: #065f46 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        .net-neg   { background: #fee2e2 !important; color: #991b1b !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        .net-zero  { background: #f1f5f9 !important; color: #64748b !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        .cat-chip-sm { background: #e0e7ff !important; color: #3730a3 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        .sev-out      { background: #fee2e2 !important; color: #7f1d1d !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        .sev-critical { background: #ffedd5 !important; color: #7c2d12 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        .sev-low      { background: #fef9c3 !important; color: #713f12 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+        /* ── 8. TOP SELLERS ── */
+        .seller-row {
+            border: 1px solid #e2e8f0 !important;
+            border-radius: 0 !important; padding: 5px 10px !important;
+            background: white !important;
+        }
+        .seller-rank {
+            background: #162135 !important;
+            border-radius: 2px !important;
+            width: 18px !important; height: 18px !important;
+            font-size: 0.52rem !important;
+            -webkit-print-color-adjust: exact; print-color-adjust: exact;
+        }
+        .seller-name { font-size: 0.65rem !important; }
+        .seller-flavor { font-size: 0.58rem !important; }
+        .seller-qty { font-size: 0.6rem !important; }
+        .rev-cell { font-size: 0.62rem !important; }
+
+        /* ── 9. CATEGORY PERFORMANCE ── */
+        .cat-perf-grid { gap: 5px !important; }
+        .cat-perf-card {
+            border: 1px solid #cbd5e1 !important;
+            border-radius: 0 !important; padding: 8px !important;
+            border-left: 3px solid #705194 !important;
+            -webkit-print-color-adjust: exact; print-color-adjust: exact;
+        }
+        .cat-perf-name { font-size: 0.52rem !important; }
+        .cat-perf-rev  { font-size: 0.85rem !important; }
+        .cat-perf-sold { font-size: 0.5rem !important; }
+
+        /* ── 10. GROSS PROFIT CARD ── */
         .gross-profit-print { display: block !important; }
 
-        /* ── Document header ── */
-        .doc-header { border-bottom: 3px solid #162135 !important; padding-bottom: 16px !important; }
-        .brand-block h2 { font-size: 1.4rem !important; }
-        .report-period-badge { background: #f3eeff !important; color: #705194 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        /* ── 11. FOOTER: navy rule + authorization line ── */
+        .doc-footer {
+            border-top: 2px solid #162135 !important;
+            margin-top: 16px !important; padding-top: 10px !important;
+            display: flex !important; justify-content: space-between !important;
+            font-size: 0.55rem !important; color: #475569 !important;
+            -webkit-print-color-adjust: exact; print-color-adjust: exact;
+        }
+        .doc-footer::after {
+            content: "Prepared By: ________________________________    Authorized By: ________________________________";
+            display: block !important;
+            width: 100% !important;
+            font-size: 0.58rem !important;
+            color: #475569 !important;
+            margin-top: 14px !important;
+            padding-top: 10px !important;
+            border-top: 1px dashed #cbd5e1 !important;
+        }
 
-        /* ── Page breaks ── */
-        .section-heading { page-break-before: auto; margin-top: 20px !important; }
-        .report-table thead, .warn-table thead { display: table-header-group; }
-        .report-table tbody tr, .warn-table tbody tr { page-break-inside: avoid; }
+        /* ── 12. PAGE BREAKS ── */
+        .report-table thead, .warn-table thead { display: table-header-group !important; }
+        .report-table tbody tr, .warn-table tbody tr { page-break-inside: avoid !important; }
+        .sellers-grid, .cat-perf-grid { page-break-inside: avoid !important; }
 
-        /* ── Footer ── */
-        .doc-footer { border-top: 1px solid #e2e8f0 !important; margin-top: 24px !important; }
+        /* ── 13. UTILITIES ── */
         a { text-decoration: none !important; }
+        .swipe-hint { display: none !important; }
     }
 </style>
 
@@ -5154,69 +5367,214 @@ TEMPLATES["purchase_report.html"] = """
     }
 
     /* ── Page setup ── */
-    @page { size: A4 portrait; margin: 16mm 14mm 16mm; }
+    @page { size: A4 portrait; margin: 12mm 10mm 14mm; }
 
+    /* ===================================================================
+       PRINT LAYOUT — Purchase / Stock-In Report
+       Visual identity: Centered document box · Green accents ·
+       Receipt-style tables · Received-by signature block
+    =================================================================== */
     @media print {
-        /* ── STEP 1: Hide every element on the page ── */
-        body * { visibility: hidden !important; }
 
-        /* ── STEP 2: Show ONLY the report document and all its children ── */
+        /* ── 0. ISOLATE THE DOCUMENT ── */
+        body * { visibility: hidden !important; }
         #report-capture-area,
         #report-capture-area * { visibility: visible !important; }
 
-        /* ── STEP 3: Pull the report out of any parent layout and pin it full-width ── */
+        /* ── 1. CANVAS ── */
         #report-capture-area {
             position: fixed !important;
             top: 0 !important; left: 0 !important;
             width: 100vw !important; height: auto !important;
             margin: 0 !important;
-            padding: 24px 32px !important;
+            padding: 28px 32px 24px !important;
             border: none !important; box-shadow: none !important;
+            border-radius: 0 !important; background: #fff !important;
+            -webkit-print-color-adjust: exact; print-color-adjust: exact;
+        }
+
+        /* ── 2. HEADER: centered formal document box ── */
+        .doc-header {
+            display: block !important;
+            text-align: center !important;
+            border: 2px solid #162135 !important;
+            border-top: 6px solid #059669 !important;
             border-radius: 0 !important;
+            padding: 16px 24px 14px !important;
+            margin-bottom: 20px !important;
+            background: #f8fafc !important;
+            -webkit-print-color-adjust: exact; print-color-adjust: exact;
+        }
+        .brand-info { display: block !important; text-align: center !important; }
+        .brand-info h2 {
+            font-size: 1.1rem !important; font-weight: 900 !important;
+            color: #162135 !important; letter-spacing: 2px !important;
+            text-transform: uppercase !important; margin: 0 !important;
+        }
+        .brand-info p {
+            font-size: 0.6rem !important; color: #64748b !important;
+            margin: 3px 0 0 !important; letter-spacing: 1px !important;
+            text-transform: uppercase !important;
+        }
+        .report-type-label {
+            font-size: 0.75rem !important; font-weight: 900 !important;
+            color: #162135 !important; text-transform: uppercase !important;
+            letter-spacing: 1.5px !important;
+            border-top: 1px solid #cbd5e1 !important;
+            padding-top: 10px !important; margin-top: 10px !important;
+        }
+        .report-date { font-size: 0.62rem !important; color: #64748b !important; margin-top: 4px !important; }
+        .report-period-badge {
+            display: inline-block !important;
+            background: #059669 !important;
+            color: white !important;
+            border-radius: 2px !important;
+            font-size: 0.58rem !important; font-weight: 800 !important;
+            padding: 3px 12px !important; margin-top: 8px !important;
+            letter-spacing: 1px !important; text-transform: uppercase !important;
+            border: none !important;
+            -webkit-print-color-adjust: exact; print-color-adjust: exact;
+        }
+
+        /* ── 3. KPI METRICS: flat horizontal ledger strip ── */
+        .report-grid {
+            display: grid !important;
+            grid-template-columns: repeat(3, 1fr) !important;
+            gap: 0 !important;
+            border: 1.5px solid #162135 !important;
+            border-radius: 0 !important;
+            margin-bottom: 18px !important;
+            -webkit-print-color-adjust: exact; print-color-adjust: exact;
+        }
+        .stat-card {
+            border: none !important;
+            border-right: 1px solid #94a3b8 !important;
+            border-radius: 0 !important;
+            padding: 10px 14px !important;
+            box-shadow: none !important;
+            text-align: center !important;
             background: white !important;
             -webkit-print-color-adjust: exact; print-color-adjust: exact;
         }
+        .stat-card:last-child { border-right: none !important; }
+        .stat-card label {
+            display: block !important;
+            font-size: 0.5rem !important; text-transform: uppercase !important;
+            letter-spacing: 0.6px !important; color: #475569 !important;
+            font-weight: 800 !important; margin-bottom: 5px !important;
+        }
+        .stat-card .value { font-size: 1.05rem !important; font-weight: 900 !important; }
+        .stat-card .value.blue   { color: #1d4ed8 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        .stat-card .value.orange { color: #b45309 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        .stat-card .value.green  { color: #059669 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 
-        /* ── Tables ── */
-        .table-responsive { overflow: visible !important; }
+        /* ── 4. SECTION HEADINGS: green left-accent + tinted background ── */
+        .section-heading {
+            display: block !important;
+            font-size: 0.58rem !important; font-weight: 900 !important;
+            text-transform: uppercase !important; letter-spacing: 1.2px !important;
+            color: #162135 !important;
+            background: #f0fdf4 !important;
+            border-left: 4px solid #059669 !important;
+            border-top: 1px solid #bbf7d0 !important;
+            border-bottom: 1px solid #bbf7d0 !important;
+            padding: 5px 12px !important;
+            margin: 14px 0 8px !important;
+            page-break-after: avoid !important;
+            -webkit-print-color-adjust: exact; print-color-adjust: exact;
+        }
+        .section-heading::after { display: none !important; }
+        .section-heading i { display: none !important; }
+
+        /* ── 5. CATEGORY CHIPS: compact two-column list ── */
+        .cat-grid {
+            display: grid !important;
+            grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)) !important;
+            gap: 5px !important; margin-bottom: 14px !important;
+            page-break-inside: avoid !important;
+        }
+        .cat-chip {
+            border: 1px solid #d1fae5 !important;
+            border-radius: 0 !important;
+            border-left: 3px solid #059669 !important;
+            padding: 6px 10px !important;
+            background: #f0fdf4 !important;
+            flex-direction: row !important;
+            justify-content: space-between !important;
+            align-items: center !important;
+            -webkit-print-color-adjust: exact; print-color-adjust: exact;
+        }
+        .cat-chip .cat-name { font-size: 0.6rem !important; color: #1a3a2a !important; font-weight: 700 !important; }
+        .cat-chip .cat-qty  { font-size: 0.8rem !important; color: #059669 !important; font-weight: 900 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+        /* ── 6. TABLES: receipt-style, compact, green detail ── */
+        .table-responsive {
+            overflow: visible !important;
+            border: 1px solid #94a3b8 !important;
+            border-radius: 0 !important; margin-bottom: 12px !important;
+        }
         .report-table, .log-table {
-            min-width: unset !important; width: 100% !important; font-size: 0.7rem !important;
+            width: 100% !important; min-width: unset !important;
+            font-size: 0.62rem !important; border-collapse: collapse !important;
         }
         .report-table th, .log-table th {
-            background: #162135 !important; color: white !important;
-            -webkit-print-color-adjust: exact; print-color-adjust: exact;
-            padding: 7px 9px !important;
-        }
-        .report-table td, .log-table td { padding: 6px 9px !important; }
-        .report-table tbody tr:nth-child(even) td, .log-table tbody tr:nth-child(even) td {
-            background: #f8f9ff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact;
-        }
-
-        /* ── KPI ── */
-        .stat-card {
-            box-shadow: none !important; border: 1px solid #e2e8f0 !important;
+            background: #162135 !important; color: #ffffff !important;
+            padding: 6px 8px !important; font-size: 0.54rem !important;
+            font-weight: 800 !important; text-transform: uppercase !important;
+            letter-spacing: 0.5px !important; border: none !important;
+            white-space: nowrap !important;
             -webkit-print-color-adjust: exact; print-color-adjust: exact;
         }
-        .report-grid { grid-template-columns: repeat(3, 1fr) !important; gap: 10px !important; }
-        .stat-card .value { font-size: 1.2rem !important; }
-
-        /* ── Badges ── */
-        .qty-badge, .report-period-badge, .cat-chip {
+        .report-table td, .log-table td {
+            padding: 5px 8px !important;
+            border-bottom: 1px solid #e2e8f0 !important;
+            border-right: 1px solid #e8edf2 !important;
+            vertical-align: middle !important; font-size: 0.62rem !important;
+        }
+        .report-table tbody tr:nth-child(odd) td,
+        .log-table tbody tr:nth-child(odd) td { background: white !important; }
+        .report-table tbody tr:nth-child(even) td,
+        .log-table tbody tr:nth-child(even) td {
+            background: #f0fdf4 !important;
             -webkit-print-color-adjust: exact; print-color-adjust: exact;
         }
-        .qty-badge { background: #d1fae5 !important; color: #065f46 !important; border-color: #a7f3d0 !important; }
 
-        /* ── Document header ── */
-        .doc-header { border-bottom: 3px solid #162135 !important; }
+        /* ── 7. QTY BADGE ── */
+        .qty-badge {
+            background: #d1fae5 !important; color: #065f46 !important;
+            border: 1px solid #a7f3d0 !important;
+            border-radius: 2px !important; font-size: 0.55rem !important;
+            -webkit-print-color-adjust: exact; print-color-adjust: exact;
+        }
 
-        /* ── Page breaks ── */
-        .cat-grid { page-break-inside: avoid; }
-        .report-table thead, .log-table thead { display: table-header-group; }
-        .report-table tbody tr, .log-table tbody tr { page-break-inside: avoid; }
+        /* ── 8. FOOTER: double-line signature block ── */
+        .doc-footer {
+            border-top: 2px solid #162135 !important;
+            margin-top: 18px !important; padding-top: 10px !important;
+            display: flex !important; justify-content: space-between !important;
+            font-size: 0.55rem !important; color: #475569 !important;
+            -webkit-print-color-adjust: exact; print-color-adjust: exact;
+        }
 
-        /* ── Footer ── */
-        .doc-footer { border-top: 1px solid #e2e8f0 !important; }
+        /* Signature rows via pseudo-element */
+        .doc-footer::after {
+            content: "Received By: ________________________________     Date Received: ________________     Checked By: ____________________________";
+            display: block !important;
+            width: 100% !important;
+            font-size: 0.58rem !important; color: #475569 !important;
+            padding-top: 10px !important; margin-top: 12px !important;
+            border-top: 1px dashed #a7f3d0 !important;
+            -webkit-print-color-adjust: exact; print-color-adjust: exact;
+        }
+
+        /* ── 9. PAGE BREAKS ── */
+        .cat-grid { page-break-inside: avoid !important; }
+        .report-table thead, .log-table thead { display: table-header-group !important; }
+        .report-table tbody tr, .log-table tbody tr { page-break-inside: avoid !important; }
+
+        /* ── 10. UTILITIES ── */
         a { text-decoration: none !important; }
+        .swipe-hint { display: none !important; }
     }
 </style>
 
