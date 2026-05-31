@@ -2244,7 +2244,7 @@ TEMPLATES["inventory.html"] = """
             <h1>Inventory</h1>
         </div>
         <div class="header-right">
-            <button class="print-btn no-print" onclick="openInvPreview()">
+            <button class="print-btn no-print" onclick="directInvPrint()">
                 <i class="fas fa-print"></i> Print
             </button>
             <div class="cat-filters">
@@ -2409,6 +2409,121 @@ TEMPLATES["inventory.html"] = """
             else if (qty < 5)  lowCount++;
         });
         return { totalSkus, totalUnits, outCount, lowCount, totalValue };
+    }
+
+    function directInvPrint() {
+        const now = new Date();
+        const dateStr = now.toLocaleString('en-PH', { year:'numeric', month:'long', day:'numeric', hour:'2-digit', minute:'2-digit' });
+        const stats = _getInvStats();
+
+        document.getElementById('pdh-date-stamp').textContent = 'Generated: ' + dateStr;
+        document.getElementById('pdh-footer-ts').textContent  = 'Generated: ' + dateStr + '  |  Page 1';
+        document.getElementById('pdh-summary-bar').innerHTML =
+            _statChip('Total SKUs',   stats.totalSkus,   '') +
+            _statChip('Total Units',  stats.totalUnits,  '') +
+            _statChip('Out of Stock', stats.outCount,    stats.outCount > 0 ? 'c-red' : 'c-green') +
+            _statChip('Low Stock',    stats.lowCount,    stats.lowCount > 0 ? 'c-red' : 'c-green') +
+            _statChip('Inventory Value', '₱'+stats.totalValue.toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2}), 'c-purple');
+
+        const visibleRows = Array.from(document.querySelectorAll('#invTable tbody tr'))
+            .filter(r => r.style.display !== 'none');
+
+        let tableRows = '';
+        visibleRows.forEach((row, i) => {
+            const tds = row.querySelectorAll('td');
+            if (tds.length < 10) return;
+            const code    = tds[1]  ? tds[1].textContent.trim()  : '\u2014';
+            const name    = tds[2]  ? tds[2].textContent.trim()  : '\u2014';
+            const flavor  = tds[3]  ? tds[3].textContent.trim()  : '\u2014';
+            const cat     = tds[4]  ? tds[4].textContent.trim()  : '\u2014';
+            const ver     = tds[5]  ? tds[5].textContent.trim()  : '\u2014';
+            const mg      = tds[6]  ? tds[6].textContent.trim()  : '\u2014';
+            const cost    = tds[7]  ? tds[7].textContent.trim()  : '\u2014';
+            const price   = tds[8]  ? tds[8].textContent.trim()  : '\u2014';
+            const qtyNum  = parseInt((tds[9] ? tds[9].textContent : '0').replace(/[^0-9]/g,'')) || 0;
+
+            let qtyCell, rowBg='';
+            if (qtyNum <= 0)     { qtyCell='<span style="background:#f3f4f6;color:#4b5563;padding:3px 10px;border-radius:50px;font-size:0.68rem;font-weight:800;">OUT</span>'; rowBg='#fff5f5'; }
+            else if (qtyNum < 5) { qtyCell='<span style="background:#fee2e2;color:#991b1b;padding:3px 10px;border-radius:50px;font-size:0.68rem;font-weight:800;">'+qtyNum+' PCS ⚠</span>'; rowBg='#fffaf0'; }
+            else                 { qtyCell='<span style="background:#d1fae5;color:#065f46;padding:3px 10px;border-radius:50px;font-size:0.68rem;font-weight:800;">'+qtyNum+' PCS</span>'; }
+
+            tableRows += `<tr style="background:${rowBg||( i%2===0 ? '#fff':'#f8f9ff' )};">
+                <td style="color:#94a3b8;font-weight:700;font-size:0.65rem;text-align:center;">${i+1}</td>
+                <td><span style="background:#ede9f8;color:#705194;padding:2px 7px;border-radius:5px;font-size:0.68rem;font-weight:800;font-family:monospace;">${code||'\u2014'}</span></td>
+                <td style="font-weight:700;font-size:0.78rem;">${name}</td>
+                <td style="color:#705194;font-weight:600;font-size:0.75rem;">${flavor||'\u2014'}</td>
+                <td><span style="background:#e0e7ff;color:#4338ca;padding:2px 8px;border-radius:50px;font-size:0.62rem;font-weight:800;text-transform:uppercase;">${cat}</span></td>
+                <td style="font-size:0.72rem;color:#64748b;">${ver||'\u2014'}</td>
+                <td style="font-size:0.72rem;color:#64748b;">${mg||'\u2014'}</td>
+                <td style="font-size:0.72rem;color:#64748b;">${cost}</td>
+                <td style="font-weight:700;color:#162135;">${price}</td>
+                <td>${qtyCell}</td>
+            </tr>`;
+        });
+
+        const content = `
+            <div style="padding:0;font-family:'Inter','Outfit',sans-serif;color:#162135;">
+                <div style="border-bottom:3px solid #162135;padding-bottom:16px;margin-bottom:18px;">
+                    <div style="display:flex;justify-content:space-between;align-items:flex-end;">
+                        <div>
+                            <div style="font-size:1.45rem;font-weight:900;letter-spacing:1.5px;color:#162135;margin:0 0 3px;">F.L.E.X VAPE SHOP</div>
+                            <div style="font-size:0.6rem;text-transform:uppercase;letter-spacing:1px;color:#64748b;">Inventory Management System &bull; Stock Level Report</div>
+                        </div>
+                        <div style="text-align:right;">
+                            <div style="font-size:0.9rem;font-weight:800;color:#705194;text-transform:uppercase;letter-spacing:0.5px;">Inventory Report</div>
+                            <div style="font-size:0.65rem;color:#94a3b8;margin-top:3px;">Generated: ${dateStr}</div>
+                        </div>
+                    </div>
+                    <div style="display:flex;gap:0;margin-top:14px;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
+                        ${_previewStatChip('Total SKUs',   stats.totalSkus,   '#162135')}
+                        ${_previewStatChip('Total Units',  stats.totalUnits,  '#162135')}
+                        ${_previewStatChip('Out of Stock', stats.outCount,    stats.outCount > 0 ? '#ef4444':'#10b981')}
+                        ${_previewStatChip('Low Stock',    stats.lowCount,    stats.lowCount > 0 ? '#ef4444':'#10b981')}
+                        ${_previewStatChip('Inventory Value', '₱'+stats.totalValue.toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2}), '#705194', true)}
+                    </div>
+                </div>
+                <table style="width:100%;border-collapse:collapse;font-size:0.72rem;">
+                    <thead>
+                        <tr style="background:#162135;">
+                            <th style="padding:8px 9px;color:white;font-size:0.58rem;text-transform:uppercase;text-align:center;letter-spacing:.5px;">#</th>
+                            <th style="padding:8px 9px;color:white;font-size:0.58rem;text-transform:uppercase;letter-spacing:.5px;">Code</th>
+                            <th style="padding:8px 9px;color:white;font-size:0.58rem;text-transform:uppercase;letter-spacing:.5px;">Product Name</th>
+                            <th style="padding:8px 9px;color:white;font-size:0.58rem;text-transform:uppercase;letter-spacing:.5px;">Flavor</th>
+                            <th style="padding:8px 9px;color:white;font-size:0.58rem;text-transform:uppercase;letter-spacing:.5px;">Category</th>
+                            <th style="padding:8px 9px;color:white;font-size:0.58rem;text-transform:uppercase;letter-spacing:.5px;">Version</th>
+                            <th style="padding:8px 9px;color:white;font-size:0.58rem;text-transform:uppercase;letter-spacing:.5px;">ML/MG</th>
+                            <th style="padding:8px 9px;color:white;font-size:0.58rem;text-transform:uppercase;letter-spacing:.5px;">Cost</th>
+                            <th style="padding:8px 9px;color:white;font-size:0.58rem;text-transform:uppercase;letter-spacing:.5px;">Price</th>
+                            <th style="padding:8px 9px;color:white;font-size:0.58rem;text-transform:uppercase;letter-spacing:.5px;text-align:center;">Stock</th>
+                        </tr>
+                    </thead>
+                    <tbody>${tableRows}</tbody>
+                </table>
+                <div style="margin-top:18px;padding-top:10px;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;font-size:0.58rem;color:#94a3b8;">
+                    <span>F.L.E.X Inventory Management System &bull; Confidential</span>
+                    <span>Generated: ${dateStr}</span>
+                </div>
+            </div>`;
+
+        const printWin = window.open('', '_blank', 'width=1000,height=750');
+        printWin.document.write(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>F.L.E.X Inventory Report</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family:'Inter','Outfit',sans-serif; color:#162135; background:white; padding:18mm 14mm 16mm; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+    @page { size:A4 landscape; margin:18mm 14mm 16mm; }
+    @media print { body { padding:0; } }
+  </style>
+</head>
+<body>${content}</body>
+</html>`);
+        printWin.document.close();
+        printWin.focus();
+        setTimeout(() => { printWin.print(); printWin.close(); }, 600);
     }
 
     function openInvPreview() {
