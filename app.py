@@ -1767,45 +1767,6 @@ TEMPLATES["inventory.html"] = """
 
     .header-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 
-    /* ─── PRINT PREVIEW MODAL ─── */
-    #invPrintModal {
-        display: none; position: fixed; inset: 0; z-index: 9999;
-        background: rgba(10,10,20,0.72); backdrop-filter: blur(6px);
-        align-items: flex-start; justify-content: center; padding: 20px;
-        overflow-y: auto;
-    }
-    #invPrintModal.open { display: flex; }
-    .ipm-shell {
-        background: #fff; width: 100%; max-width: 860px;
-        border-radius: 18px; overflow: hidden;
-        box-shadow: 0 30px 80px rgba(0,0,0,0.4);
-        margin: auto;
-    }
-    .ipm-toolbar {
-        display: flex; align-items: center; justify-content: space-between;
-        padding: 14px 20px; background: #162135; color: white;
-        gap: 12px; flex-wrap: wrap;
-    }
-    .ipm-toolbar-title { font-size: 0.9rem; font-weight: 800; letter-spacing: 0.5px; }
-    .ipm-btn {
-        display: inline-flex; align-items: center; gap: 7px;
-        padding: 8px 18px; border-radius: 8px; border: none;
-        font-weight: 700; font-size: 0.82rem; cursor: pointer;
-        transition: 0.2s;
-    }
-    .ipm-btn-print { background: #705194; color: white; }
-    .ipm-btn-print:hover { background: #5a3d7a; }
-    .ipm-btn-close { background: rgba(255,255,255,0.12); color: white; }
-    .ipm-btn-close:hover { background: rgba(255,255,255,0.22); }
-    .ipm-page-wrap { background: #e8eaf0; padding: 24px; overflow-y: auto; max-height: 78vh; }
-    .ipm-page {
-        background: white; width: 100%; max-width: 790px;
-        margin: 0 auto; padding: 36px 44px;
-        box-shadow: 0 4px 24px rgba(0,0,0,0.14);
-        font-family: 'Inter', 'Outfit', sans-serif;
-        color: #162135;
-    }
-
     /* ─── PRINT-ONLY HEADER (invisible on screen, visible in print) ─── */
     .print-doc-header { display: none; }
 
