@@ -1861,21 +1861,56 @@ TEMPLATES["inventory.html"] = """
         .list-header { flex-direction: column; align-items: stretch; }
         .search-box { max-width: 100%; }
     }
+
+    /* ─── PRINT PREVIEW OVERLAY ─── */
+    #invPrintModal {
+        display: none;
+        position: fixed; inset: 0; z-index: 9999;
+        background: rgba(15,23,42,0.72);
+        overflow-y: auto;
+        padding: 36px 20px 100px;
+    }
+    #invPrintModal.open { display: block; }
+    .ipm-shell {
+        background: white;
+        max-width: 960px; margin: 0 auto;
+        border-radius: 14px; padding: 44px 48px;
+        box-shadow: 0 24px 80px rgba(0,0,0,0.35);
+    }
+    /* Floating close × */
+    .ipm-fab-close {
+        position: fixed; top: 18px; right: 18px; z-index: 10000;
+        background: white; border: 1.5px solid #e2e8f0;
+        width: 42px; height: 42px; border-radius: 50%;
+        font-size: 0.95rem; cursor: pointer;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.15);
+        display: flex; align-items: center; justify-content: center;
+        color: #64748b; transition: 0.18s;
+    }
+    .ipm-fab-close:hover { color: #162135; border-color: #cbd5e1; background: #f8fafc; }
+    /* Floating print button */
+    .ipm-fab-print {
+        position: fixed; bottom: 28px; right: 28px; z-index: 10000;
+        background: #705194; color: white; border: none;
+        padding: 13px 22px; border-radius: 50px;
+        font-size: 0.82rem; font-weight: 700; cursor: pointer;
+        box-shadow: 0 6px 24px rgba(112,81,148,0.45);
+        display: flex; align-items: center; gap: 8px;
+        transition: 0.18s; letter-spacing: 0.2px;
+    }
+    .ipm-fab-print:hover { background: #5a3d7a; transform: translateY(-2px); }
 </style>
 
 <!-- ═══ PRINT PREVIEW MODAL ═══ -->
 <div id="invPrintModal">
+    <button class="ipm-fab-close no-print" onclick="closeInvPreview()" title="Close preview">
+        <i class="fas fa-times"></i>
+    </button>
+    <button class="ipm-fab-print no-print" onclick="confirmInvPrint()">
+        <i class="fas fa-print"></i> Print Now
+    </button>
     <div class="ipm-shell">
-        <div class="ipm-toolbar">
-            <span class="ipm-toolbar-title"><i class="fas fa-print" style="margin-right:8px;opacity:.8;"></i>Print Preview — Inventory Report</span>
-            <div style="display:flex;gap:8px;">
-                <button class="ipm-btn ipm-btn-print" onclick="confirmInvPrint()"><i class="fas fa-print"></i> Print Now</button>
-                <button class="ipm-btn ipm-btn-close" onclick="closeInvPreview()"><i class="fas fa-times"></i> Close</button>
-            </div>
-        </div>
-        <div class="ipm-page-wrap">
-            <div class="ipm-page" id="invPreviewContent"></div>
-        </div>
+        <div id="invPreviewContent"></div>
     </div>
 </div>
 
@@ -2195,26 +2230,16 @@ TEMPLATES["inventory.html"] = """
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   <style>
     * { margin:0; padding:0; box-sizing:border-box; }
-    body {
-      font-family: 'Inter', 'Outfit', sans-serif;
-      color: #162135;
-      background: white;
-      padding: 18mm 14mm 16mm;
-      -webkit-print-color-adjust: exact;
-      print-color-adjust: exact;
-    }
-    @page { size: A4 landscape; margin: 18mm 14mm 16mm; }
-    @media print { body { padding: 0; } }
+    body { font-family:'Inter','Outfit',sans-serif; color:#162135; background:white; padding:18mm 14mm 16mm; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+    @page { size:A4 landscape; margin:18mm 14mm 16mm; }
+    @media print { body { padding:0; } }
   </style>
 </head>
 <body>${content}</body>
 </html>`);
         printWin.document.close();
         printWin.focus();
-        setTimeout(() => {
-            printWin.print();
-            printWin.close();
-        }, 600);
+        setTimeout(() => { printWin.print(); printWin.close(); }, 600);
         closeInvPreview();
     }
 
