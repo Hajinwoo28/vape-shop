@@ -1143,6 +1143,30 @@ TEMPLATES["base.html"] = """
                 transition-duration: 0.01ms !important;
             }
         }
+
+        /* ═══════════════════════════════════════
+           GLOBAL PRINT RESET
+           Strips the sidebar-offset body layout.
+           Page templates add the visibility trick
+           on top of this to isolate their content.
+        ═══════════════════════════════════════ */
+        @media print {
+            html, body {
+                display: block !important;
+                width: 100% !important; height: auto !important;
+                margin: 0 !important; padding: 0 !important;
+                background: white !important;
+                overflow: visible !important;
+            }
+            .sidebar, .mobile-header, .sidebar-overlay,
+            .flash-container, #fsScannerContainer { display: none !important; }
+            .main-content {
+                margin-left: 0 !important;
+                width: 100% !important;
+                padding: 0 !important;
+                display: block !important;
+            }
+        }
     </style>
 </head>
 <body>
@@ -3241,28 +3265,35 @@ TEMPLATES["reports.html"] = """
 
     /* ===== PRINT ===== */
     @media print {
-        nav, .sidebar, .mobile-header, .mobile-toggle, .no-print, .swipe-hint,
-        .flash-container, .period-selector, .report-controls, #rptPrintModal { display: none !important; }
+        /* ── STEP 1: Hide every element on the page ── */
+        body * { visibility: hidden !important; }
 
-        html, body { background: white !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-        .main-content { margin-left: 0 !important; width: 100% !important; padding: 0 !important; }
+        /* ── STEP 2: Show ONLY the report document and all its children ── */
+        #report-capture-area,
+        #report-capture-area * { visibility: visible !important; }
 
-        /* Document area */
+        /* ── STEP 3: Pull the report out of any parent layout and pin it full-width ── */
         #report-capture-area {
+            position: fixed !important;
+            top: 0 !important; left: 0 !important;
+            width: 100vw !important; height: auto !important;
+            margin: 0 !important;
+            padding: 24px 32px !important;
             border: none !important; box-shadow: none !important;
-            padding: 28px 32px !important; border-radius: 0 !important;
-            width: 100% !important; max-width: none !important;
+            border-radius: 0 !important;
+            background: white !important;
+            -webkit-print-color-adjust: exact; print-color-adjust: exact;
         }
 
-        /* Tables */
+        /* ── Tables ── */
         .table-responsive { overflow: visible !important; border: 1px solid #e2e8f0 !important; border-radius: 8px !important; }
         .warn-table-wrap  { overflow: visible !important; }
-        .report-table, .warn-table { font-size: 0.7rem !important; }
+        .report-table, .warn-table { font-size: 0.7rem !important; min-width: unset !important; width: 100% !important; }
         .report-table th  { background: #162135 !important; color: white !important; padding: 7px 10px !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         .report-table td  { padding: 6px 10px !important; }
         .warn-table th    { background: #fff1f2 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 
-        /* KPI grid */
+        /* ── KPI grid ── */
         .report-grid { grid-template-columns: repeat(4, 1fr) !important; gap: 10px !important; }
         .stat-card {
             box-shadow: none !important; border: 1px solid #e2e8f0 !important;
@@ -3270,7 +3301,7 @@ TEMPLATES["reports.html"] = """
         }
         .stat-card .value { font-size: 1.2rem !important; }
 
-        /* Colour badges */
+        /* ── Colour badges ── */
         .net-pos, .net-neg, .net-zero, .cat-chip-sm, .sev-out, .sev-critical, .sev-low, .cat-perf-card {
             -webkit-print-color-adjust: exact; print-color-adjust: exact;
         }
@@ -3280,20 +3311,20 @@ TEMPLATES["reports.html"] = """
         .row-positive td { background: rgba(16,185,129,.06) !important; }
         .row-negative td { background: rgba(239,68,68,.06)  !important; }
 
-        /* Gross Profit card visible */
+        /* ── Gross Profit card ── */
         .gross-profit-print { display: block !important; }
 
-        /* Headers */
+        /* ── Document header ── */
         .doc-header { border-bottom: 3px solid #162135 !important; padding-bottom: 16px !important; }
         .brand-block h2 { font-size: 1.4rem !important; }
         .report-period-badge { background: #f3eeff !important; color: #705194 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 
-        /* Page breaks */
+        /* ── Page breaks ── */
         .section-heading { page-break-before: auto; margin-top: 20px !important; }
         .report-table thead, .warn-table thead { display: table-header-group; }
         .report-table tbody tr, .warn-table tbody tr { page-break-inside: avoid; }
 
-        /* Footer */
+        /* ── Footer ── */
         .doc-footer { border-top: 1px solid #e2e8f0 !important; margin-top: 24px !important; }
         a { text-decoration: none !important; }
     }
@@ -5126,15 +5157,27 @@ TEMPLATES["purchase_report.html"] = """
     @page { size: A4 portrait; margin: 16mm 14mm 16mm; }
 
     @media print {
-        nav, .sidebar, .mobile-header, .mobile-toggle, .no-print, header,
-        .swipe-hint, .flash-container, .report-controls, #purPrintModal { display: none !important; }
-        html, body { background: white !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-        .main-content { margin-left: 0 !important; width: 100% !important; padding: 0 !important; }
+        /* ── STEP 1: Hide every element on the page ── */
+        body * { visibility: hidden !important; }
+
+        /* ── STEP 2: Show ONLY the report document and all its children ── */
+        #report-capture-area,
+        #report-capture-area * { visibility: visible !important; }
+
+        /* ── STEP 3: Pull the report out of any parent layout and pin it full-width ── */
         #report-capture-area {
+            position: fixed !important;
+            top: 0 !important; left: 0 !important;
+            width: 100vw !important; height: auto !important;
+            margin: 0 !important;
+            padding: 24px 32px !important;
             border: none !important; box-shadow: none !important;
-            padding: 28px 32px !important; width: 100% !important; border-radius: 0 !important;
+            border-radius: 0 !important;
+            background: white !important;
+            -webkit-print-color-adjust: exact; print-color-adjust: exact;
         }
-        /* Tables */
+
+        /* ── Tables ── */
         .table-responsive { overflow: visible !important; }
         .report-table, .log-table {
             min-width: unset !important; width: 100% !important; font-size: 0.7rem !important;
@@ -5148,26 +5191,30 @@ TEMPLATES["purchase_report.html"] = """
         .report-table tbody tr:nth-child(even) td, .log-table tbody tr:nth-child(even) td {
             background: #f8f9ff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact;
         }
-        /* KPI */
+
+        /* ── KPI ── */
         .stat-card {
             box-shadow: none !important; border: 1px solid #e2e8f0 !important;
             -webkit-print-color-adjust: exact; print-color-adjust: exact;
         }
         .report-grid { grid-template-columns: repeat(3, 1fr) !important; gap: 10px !important; }
         .stat-card .value { font-size: 1.2rem !important; }
-        /* Badges */
+
+        /* ── Badges ── */
         .qty-badge, .report-period-badge, .cat-chip {
             -webkit-print-color-adjust: exact; print-color-adjust: exact;
         }
         .qty-badge { background: #d1fae5 !important; color: #065f46 !important; border-color: #a7f3d0 !important; }
-        /* Doc header */
+
+        /* ── Document header ── */
         .doc-header { border-bottom: 3px solid #162135 !important; }
-        /* Category chips */
+
+        /* ── Page breaks ── */
         .cat-grid { page-break-inside: avoid; }
-        /* Page breaks */
         .report-table thead, .log-table thead { display: table-header-group; }
         .report-table tbody tr, .log-table tbody tr { page-break-inside: avoid; }
-        /* Footer */
+
+        /* ── Footer ── */
         .doc-footer { border-top: 1px solid #e2e8f0 !important; }
         a { text-decoration: none !important; }
     }
