@@ -74,6 +74,38 @@ class StockOutLog(db.Model):
     price = db.Column(db.Float, default=0.0)
     cost = db.Column(db.Float, default=0.0)
 
+class Supplier(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    contact = db.Column(db.String(100))
+    address = db.Column(db.String(255))
+    phone = db.Column(db.String(50))
+    email = db.Column(db.String(120))
+    date_added = db.Column(db.DateTime, default=datetime.now)
+
+class PurchaseOrder(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    order_number = db.Column(db.String(30), unique=True, nullable=False)
+    supplier_id = db.Column(db.Integer, db.ForeignKey('supplier.id'), nullable=True)
+    status = db.Column(db.String(20), default='draft')  # draft, sent, received, cancelled
+    notes = db.Column(db.Text)
+    date_created = db.Column(db.DateTime, default=datetime.now)
+    date_updated = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+    supplier = db.relationship('Supplier', backref='purchase_orders')
+    items = db.relationship('PurchaseOrderItem', backref='purchase_order', cascade='all, delete-orphan')
+
+class PurchaseOrderItem(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    order_id = db.Column(db.Integer, db.ForeignKey('purchase_order.id'), nullable=False)
+    product_id = db.Column(db.Integer, db.ForeignKey('product.id'), nullable=True)
+    product_name = db.Column(db.String(100), nullable=False)
+    flavor = db.Column(db.String(100))
+    category = db.Column(db.String(50))
+    qty_ordered = db.Column(db.Integer, default=0)
+    qty_received = db.Column(db.Integer, default=0)
+    unit_cost = db.Column(db.Float, default=0.0)
+    product = db.relationship('Product', backref='order_items')
+
 # --- 3. LOGIN PROTECTION ---
 # Set FLEX_USER and FLEX_PASS environment variables in production.
 ADMIN_USER = os.environ.get("FLEX_USER", "flexinventory")
@@ -392,6 +424,250 @@ def purchase_report():
 def api_low_stock():
     items = Product.query.filter(Product.qty < 5).order_by(Product.qty.asc()).limit(10).all()
     return jsonify([{"name": p.name, "flavor": p.flavor or "", "qty": p.qty} for p in items])
+
+# ──────────────────────────────────────────────────────────────────────
+# SUPPLIER MANAGEMENT
+# ──────────────────────────────────────────────────────────────────────
+@app.route('/suppliers')
+def suppliers():
+    suppliers_list = Supplier.query.order_by(Supplier.name).all()
+    return render_template('suppliers.html', suppliers=suppliers_list)
+
+@app.route('/supplier/add', methods=['POST'])
+def supplier_add():
+    name = request.form.get('name', '').strip()
+    if not name:
+        flash('Supplier name is required.', 'error')
+        return redirect('/suppliers')
+    s = Supplier(
+        name=name,
+        contact=request.form.get('contact', '').strip(),
+        address=request.form.get('address', '').strip(),
+        phone=request.form.get('phone', '').strip(),
+        email=request.form.get('email', '').strip(),
+    )
+    db.session.add(s)
+    db.session.commit()
+    flash(f'Supplier "{name}" added.', 'success')
+    return redirect('/suppliers')
+
+@app.route('/supplier/edit/<int:id>', methods=['POST'])
+def supplier_edit(id):
+    s = Supplier.query.get_or_404(id)
+    s.name = request.form.get('name', s.name).strip()
+    s.contact = request.form.get('contact', s.contact or '').strip()
+    s.address = request.form.get('address', s.address or '').strip()
+    s.phone = request.form.get('phone', s.phone or '').strip()
+    s.email = request.form.get('email', s.email or '').strip()
+    db.session.commit()
+    flash(f'Supplier "{s.name}" updated.', 'success')
+    return redirect('/suppliers')
+
+@app.route('/supplier/delete/<int:id>', methods=['POST'])
+def supplier_delete(id):
+    s = Supplier.query.get_or_404(id)
+    db.session.delete(s)
+    db.session.commit()
+    flash(f'Supplier "{s.name}" deleted.', 'success')
+    return redirect('/suppliers')
+
+# ──────────────────────────────────────────────────────────────────────
+# PURCHASE ORDERS
+# ──────────────────────────────────────────────────────────────────────
+@app.route('/purchase_orders')
+def purchase_orders():
+    orders = PurchaseOrder.query.order_by(PurchaseOrder.date_created.desc()).all()
+    # Precompute total cost per order
+    order_totals = {}
+    for o in orders:
+        order_totals[o.id] = sum(item.qty_ordered * item.unit_cost for item in o.items)
+    return render_template('purchase_orders.html', orders=orders, order_totals=order_totals)
+
+@app.route('/purchase_order/new')
+def purchase_order_new():
+    suppliers_list = Supplier.query.order_by(Supplier.name).all()
+    products = Product.query.order_by(Product.name).all()
+    return render_template('purchase_order_form.html',
+        suppliers=suppliers_list, products=products, order=None, order_items=[])
+
+@app.route('/purchase_order/create', methods=['POST'])
+def purchase_order_create():
+    import json as _json
+    supplier_id = request.form.get('supplier_id', type=int)
+    notes = request.form.get('notes', '').strip()
+    items_json = request.form.get('items', '[]')
+
+    # Generate order number: PO-YYYYMMDD-XXXX
+    today_str = datetime.now().strftime('%Y%m%d')
+    last_order = PurchaseOrder.query.filter(
+        PurchaseOrder.order_number.like(f'PO-{today_str}-%')
+    ).order_by(PurchaseOrder.id.desc()).first()
+    seq = 1
+    if last_order:
+        try:
+            seq = int(last_order.order_number.split('-')[-1]) + 1
+        except ValueError:
+            seq = 1
+    order_number = f'PO-{today_str}-{seq:04d}'
+
+    order = PurchaseOrder(
+        order_number=order_number,
+        supplier_id=supplier_id if supplier_id else None,
+        notes=notes,
+        status='draft',
+    )
+    db.session.add(order)
+    db.session.flush()  # get order.id
+
+    items_data = _json.loads(items_json)
+    for item in items_data:
+        poi = PurchaseOrderItem(
+            order_id=order.id,
+            product_id=item.get('product_id'),
+            product_name=item.get('product_name', ''),
+            flavor=item.get('flavor', ''),
+            category=item.get('category', ''),
+            qty_ordered=int(item.get('qty_ordered', 0)),
+            unit_cost=float(item.get('unit_cost', 0)),
+        )
+        db.session.add(poi)
+
+    db.session.commit()
+    flash(f'Purchase Order {order_number} created.', 'success')
+    return redirect(f'/purchase_order/{order.id}')
+
+@app.route('/purchase_order/<int:id>')
+def purchase_order_view(id):
+    order = PurchaseOrder.query.get_or_404(id)
+    return render_template('purchase_order_detail.html', order=order)
+
+@app.route('/purchase_order/<int:id>/edit')
+def purchase_order_edit(id):
+    order = PurchaseOrder.query.get_or_404(id)
+    suppliers_list = Supplier.query.order_by(Supplier.name).all()
+    products = Product.query.order_by(Product.name).all()
+    return render_template('purchase_order_form.html',
+        suppliers=suppliers_list, products=products, order=order,
+        order_items=[{
+            'product_id': i.product_id,
+            'product_name': i.product_name,
+            'flavor': i.flavor or '',
+            'category': i.category or '',
+            'qty_ordered': i.qty_ordered,
+            'unit_cost': i.unit_cost,
+        } for i in order.items])
+
+@app.route('/purchase_order/<int:id>/update', methods=['POST'])
+def purchase_order_update(id):
+    import json as _json
+    order = PurchaseOrder.query.get_or_404(id)
+    order.supplier_id = request.form.get('supplier_id', type=int) or None
+    order.notes = request.form.get('notes', '').strip()
+    order.date_updated = datetime.now()
+
+    # Remove existing items and re-add
+    for item in order.items:
+        db.session.delete(item)
+
+    items_data = _json.loads(request.form.get('items', '[]'))
+    for item in items_data:
+        poi = PurchaseOrderItem(
+            order_id=order.id,
+            product_id=item.get('product_id'),
+            product_name=item.get('product_name', ''),
+            flavor=item.get('flavor', ''),
+            category=item.get('category', ''),
+            qty_ordered=int(item.get('qty_ordered', 0)),
+            unit_cost=float(item.get('unit_cost', 0)),
+        )
+        db.session.add(poi)
+
+    db.session.commit()
+    flash(f'Purchase Order {order.order_number} updated.', 'success')
+    return redirect(f'/purchase_order/{order.id}')
+
+@app.route('/purchase_order/<int:id>/status', methods=['POST'])
+def purchase_order_status(id):
+    order = PurchaseOrder.query.get_or_404(id)
+    new_status = request.form.get('status', order.status)
+    order.status = new_status
+    order.date_updated = datetime.now()
+
+    # If marking as received, add stock to inventory
+    if new_status == 'received':
+        for item in order.items:
+            item.qty_received = item.qty_ordered
+            if item.product_id:
+                product = Product.query.get(item.product_id)
+                if product:
+                    product.qty += item.qty_ordered
+            # Log stock-in
+            sil = StockInLog(
+                name=item.product_name,
+                flavor=item.flavor or '',
+                category=item.category or '',
+                qty=item.qty_ordered,
+            )
+            db.session.add(sil)
+
+    db.session.commit()
+    flash(f'Purchase Order {order.order_number} marked as {new_status}.', 'success')
+    return redirect(f'/purchase_order/{order.id}')
+
+@app.route('/purchase_order/<int:id>/delete', methods=['POST'])
+def purchase_order_delete(id):
+    order = PurchaseOrder.query.get_or_404(id)
+    db.session.delete(order)
+    db.session.commit()
+    flash(f'Purchase Order {order.order_number} deleted.', 'success')
+    return redirect('/purchase_orders')
+
+@app.route('/api/purchase_report_chart')
+def api_purchase_report_chart():
+    period = request.args.get('period', 'daily')
+    today = datetime.now().date()
+    if period == 'weekly':
+        start_date = today - timedelta(days=7)
+    elif period == 'monthly':
+        start_date = today - timedelta(days=30)
+    else:
+        start_date = today
+
+    start_date_str = start_date.strftime('%Y-%m-%d')
+    logs_in = StockInLog.query.filter(func.date(StockInLog.date) >= start_date_str).all()
+
+    # Daily trend data
+    daily_data = {}
+    for l in logs_in:
+        day_key = l.date.strftime('%Y-%m-%d')
+        daily_data[day_key] = daily_data.get(day_key, 0) + l.qty
+
+    # Category breakdown
+    cat_data = {}
+    for l in logs_in:
+        cat = l.category or 'Uncategorized'
+        cat_data[cat] = cat_data.get(cat, 0) + l.qty
+
+    # Sort daily data
+    sorted_days = sorted(daily_data.keys())
+    chart_labels = [datetime.strptime(d, '%Y-%m-%d').strftime('%b %d') for d in sorted_days]
+    chart_values = [daily_data[d] for d in sorted_days]
+
+    return jsonify({
+        'trend': {'labels': chart_labels, 'values': chart_values},
+        'categories': {'labels': list(cat_data.keys()), 'values': list(cat_data.values())},
+        'total_units': sum(l.qty for l in logs_in),
+        'total_entries': len(logs_in),
+    })
+
+@app.route('/api/purchase_order_item/<int:item_id>/qty', methods=['POST'])
+def api_update_po_item_qty(item_id):
+    item = PurchaseOrderItem.query.get_or_404(item_id)
+    data = request.get_json()
+    item.qty_ordered = data.get('qty_ordered', item.qty_ordered)
+    db.session.commit()
+    return jsonify({'success': True, 'qty_ordered': item.qty_ordered})
+
 
 @app.route('/analytics')
 def analytics():
@@ -1216,6 +1492,8 @@ TEMPLATES["base.html"] = """
             <li><a href="/products" class="{{ 'active' if request.path == '/products' }}"><i class="fa-solid fa-tags"></i> <span>Products</span></a></li>
             <li><a href="/reports" class="{{ 'active' if request.path == '/reports' }}"><i class="fa-solid fa-file-waveform"></i> <span>Reports</span></a></li>
             <li><a href="/purchase_report" class="{{ 'active' if request.path == '/purchase_report' }}"><i class="fa-solid fa-basket-shopping"></i> <span>Purchase Report</span></a></li>
+            <li><a href="/purchase_orders" class="{{ 'active' if request.path.startswith('/purchase_order') }}"><i class="fa-solid fa-file-invoice"></i> <span>Purchase Orders</span></a></li>
+            <li><a href="/suppliers" class="{{ 'active' if request.path == '/suppliers' }}"><i class="fa-solid fa-truck"></i> <span>Suppliers</span></a></li>
             <li><a href="/analytics" class="{{ 'active' if request.path == '/analytics' }}"><i class="fa-solid fa-chart-line"></i> <span>Analytics</span></a></li>
             <li><a href="/settings" class="{{ 'active' if request.path == '/settings' }}"><i class="fa-solid fa-gear"></i> <span>Settings</span></a></li>
         </ul>
@@ -5177,6 +5455,7 @@ TEMPLATES["purchase_report.html"] = """
 
 {% block content %}
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
 <style>
     :root {
@@ -5656,6 +5935,17 @@ TEMPLATES["purchase_report.html"] = """
         </div>
         {% endif %}
 
+        <!-- Charts Section -->
+        <div class="section-heading">Purchasing Trends &amp; Insights</div>
+        <div class="charts-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px;">
+            <div class="chart-box" style="background:#fafafa;border:1px solid var(--border-light);border-radius:12px;padding:16px;">
+                <canvas id="trendChart"></canvas>
+            </div>
+            <div class="chart-box" style="background:#fafafa;border:1px solid var(--border-light);border-radius:12px;padding:16px;">
+                <canvas id="categoryChart"></canvas>
+            </div>
+        </div>
+
         <!-- Product Breakdown Table -->
         <div class="section-heading">Product Purchase Breakdown</div>
         <div class="swipe-hint">Swipe table to see more &rarr;</div>
@@ -5741,6 +6031,63 @@ TEMPLATES["purchase_report.html"] = """
 </div>
 
 <script>
+// ── Chart.js Visualizations ──
+(function loadCharts() {
+    const period = '{{ period }}';
+    fetch('/api/purchase_report_chart?period=' + period)
+        .then(r => r.json())
+        .then(data => {
+            // Trend chart
+            if (data.trend.labels.length > 0) {
+                new Chart(document.getElementById('trendChart'), {
+                    type: 'bar',
+                    data: {
+                        labels: data.trend.labels,
+                        datasets: [{
+                            label: 'Units Received',
+                            data: data.trend.values,
+                            backgroundColor: 'rgba(112,81,148,0.7)',
+                            borderColor: '#705194',
+                            borderWidth: 2,
+                            borderRadius: 6,
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: {
+                            title: { display: true, text: 'Daily Purchase Trend', font: { weight: 'bold', size: 13 } },
+                            legend: { display: false }
+                        },
+                        scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }
+                    }
+                });
+            }
+            // Category chart
+            if (data.categories.labels.length > 0) {
+                const colors = ['#705194','#10b981','#f59e0b','#3b82f6','#ef4444','#8b5cf6','#06b6d4','#ec4899'];
+                new Chart(document.getElementById('categoryChart'), {
+                    type: 'doughnut',
+                    data: {
+                        labels: data.categories.labels,
+                        datasets: [{
+                            data: data.categories.values,
+                            backgroundColor: colors.slice(0, data.categories.labels.length),
+                            borderWidth: 2,
+                            borderColor: '#fff',
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: {
+                            title: { display: true, text: 'Units by Category', font: { weight: 'bold', size: 13 } },
+                            legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } }
+                        }
+                    }
+                });
+            }
+        });
+})();
+
 async function downloadReportImage() {
     const reportArea = document.getElementById('report-capture-area');
     const downloadBtn = document.querySelector('.btn-img');
@@ -5762,6 +6109,652 @@ async function downloadReportImage() {
     }
 }
 
+</script>
+{% endblock %}
+"""
+
+# ──────────────────────────────────────────────────────────────────────
+# TEMPLATE: suppliers.html
+# ──────────────────────────────────────────────────────────────────────
+TEMPLATES["suppliers.html"] = """
+{% extends "base.html" %}
+{% block content %}
+<style>
+    :root { --brand:#705194; --brand-light:#f3eeff; --green:#10b981; --red:#ef4444; --radius:16px; --shadow:0 2px 10px rgba(112,81,148,.05); }
+    .suppliers-wrapper { max-width:900px; margin:0 auto; padding:10px; }
+    .page-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:12px; }
+    .page-header h2 { margin:0; font-size:1.2rem; font-weight:800; color:#1e293b; }
+    .btn-add { background:var(--brand); color:white; border:none; padding:10px 20px; border-radius:10px; font-weight:700; cursor:pointer; font-size:0.8rem; display:flex; align-items:center; gap:6px; }
+    .btn-add:hover { opacity:0.9; }
+
+    .supplier-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:15px; }
+    .supplier-card { background:white; border:1.5px solid #e8e4f0; border-radius:var(--radius); padding:18px; box-shadow:var(--shadow); position:relative; }
+    .supplier-card h3 { margin:0 0 8px; font-size:0.95rem; color:#1e293b; }
+    .supplier-card .meta { font-size:0.75rem; color:#64748b; margin-bottom:4px; display:flex; align-items:center; gap:6px; }
+    .supplier-card .meta i { width:14px; color:var(--brand); }
+    .supplier-card .actions { display:flex; gap:6px; margin-top:12px; border-top:1px solid #e8e4f0; padding-top:10px; }
+    .btn-sm { border:none; padding:6px 12px; border-radius:6px; font-size:0.7rem; font-weight:700; cursor:pointer; display:flex; align-items:center; gap:4px; }
+    .btn-edit { background:#f1f5f9; color:#475569; }
+    .btn-delete { background:#fef2f2; color:#ef4444; }
+    .po-count { display:inline-block; background:var(--brand-light); color:var(--brand); padding:2px 8px; border-radius:99px; font-size:0.65rem; font-weight:700; }
+
+    /* Modal */
+    .modal-overlay { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,.4); z-index:1000; align-items:center; justify-content:center; }
+    .modal-overlay.active { display:flex; }
+    .modal-box { background:white; border-radius:var(--radius); padding:24px; width:90%; max-width:480px; max-height:90vh; overflow-y:auto; }
+    .modal-box h3 { margin:0 0 16px; font-size:1rem; }
+    .form-group { margin-bottom:12px; }
+    .form-group label { display:block; font-size:0.72rem; font-weight:700; color:#475569; text-transform:uppercase; margin-bottom:4px; }
+    .form-group input, .form-group textarea { width:100%; padding:10px; border:1.5px solid #e8e4f0; border-radius:8px; font-size:0.82rem; box-sizing:border-box; }
+    .form-group input:focus, .form-group textarea:focus { outline:none; border-color:var(--brand); }
+    .modal-actions { display:flex; gap:8px; justify-content:flex-end; margin-top:16px; }
+    .btn-cancel { background:#f1f5f9; color:#475569; border:none; padding:10px 20px; border-radius:8px; font-weight:700; cursor:pointer; font-size:0.8rem; }
+    .btn-save { background:var(--brand); color:white; border:none; padding:10px 20px; border-radius:8px; font-weight:700; cursor:pointer; font-size:0.8rem; }
+    .empty-state { text-align:center; padding:60px 20px; color:#94a3b8; }
+    .empty-state i { font-size:3rem; margin-bottom:12px; opacity:0.3; }
+</style>
+
+<div class="suppliers-wrapper">
+    <div class="page-header">
+        <h2><i class="fas fa-truck" style="color:var(--brand);margin-right:8px;"></i>Suppliers</h2>
+        <button class="btn-add" onclick="openModal()"><i class="fas fa-plus"></i> Add Supplier</button>
+    </div>
+
+    {% if suppliers %}
+    <div class="supplier-grid">
+        {% for s in suppliers %}
+        <div class="supplier-card">
+            <h3>{{ s.name }} <span class="po-count">{{ s.purchase_orders|length }} PO</span></h3>
+            {% if s.contact %}<div class="meta"><i class="fas fa-user"></i>{{ s.contact }}</div>{% endif %}
+            {% if s.phone %}<div class="meta"><i class="fas fa-phone"></i>{{ s.phone }}</div>{% endif %}
+            {% if s.email %}<div class="meta"><i class="fas fa-envelope"></i>{{ s.email }}</div>{% endif %}
+            {% if s.address %}<div class="meta"><i class="fas fa-map-marker-alt"></i>{{ s.address }}</div>{% endif %}
+            <div class="actions">
+                <button class="btn-sm btn-edit" onclick="openEditModal({{ s.id }}, '{{ s.name|e }}', '{{ s.contact|e }}', '{{ s.phone|e }}', '{{ s.email|e }}', '{{ s.address|e }}')"><i class="fas fa-pen"></i> Edit</button>
+                <form method="POST" action="/supplier/delete/{{ s.id }}" onsubmit="return confirm('Delete {{ s.name|e }}?')" style="display:inline;">
+                    <button class="btn-sm btn-delete" type="submit"><i class="fas fa-trash"></i> Delete</button>
+                </form>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <i class="fas fa-truck"></i>
+        <p>No suppliers yet. Add your first supplier to start creating purchase orders.</p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Add/Edit Modal -->
+<div class="modal-overlay" id="supplierModal">
+    <div class="modal-box">
+        <h3 id="modalTitle">Add Supplier</h3>
+        <form id="supplierForm" method="POST">
+            <input type="hidden" id="editId" name="edit_id" value="">
+            <div class="form-group">
+                <label>Supplier Name *</label>
+                <input type="text" name="name" id="sName" required placeholder="e.g. VapeTech Distributors">
+            </div>
+            <div class="form-group">
+                <label>Contact Person</label>
+                <input type="text" name="contact" id="sContact" placeholder="e.g. Juan Dela Cruz">
+            </div>
+            <div class="form-group">
+                <label>Phone</label>
+                <input type="text" name="phone" id="sPhone" placeholder="e.g. 0917-123-4567">
+            </div>
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" name="email" id="sEmail" placeholder="e.g. orders@supplier.com">
+            </div>
+            <div class="form-group">
+                <label>Address</label>
+                <input type="text" name="address" id="sAddress" placeholder="e.g. 123 Main St, City">
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn-cancel" onclick="closeModal()">Cancel</button>
+                <button type="submit" class="btn-save">Save Supplier</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+function openModal() {
+    document.getElementById('modalTitle').textContent = 'Add Supplier';
+    document.getElementById('editId').value = '';
+    document.getElementById('supplierForm').action = '/supplier/add';
+    document.getElementById('sName').value = '';
+    document.getElementById('sContact').value = '';
+    document.getElementById('sPhone').value = '';
+    document.getElementById('sEmail').value = '';
+    document.getElementById('sAddress').value = '';
+    document.getElementById('supplierModal').classList.add('active');
+}
+function openEditModal(id, name, contact, phone, email, address) {
+    document.getElementById('modalTitle').textContent = 'Edit Supplier';
+    document.getElementById('editId').value = id;
+    document.getElementById('supplierForm').action = '/supplier/edit/' + id;
+    document.getElementById('sName').value = name;
+    document.getElementById('sContact').value = contact;
+    document.getElementById('sPhone').value = phone;
+    document.getElementById('sEmail').value = email;
+    document.getElementById('sAddress').value = address;
+    document.getElementById('supplierModal').classList.add('active');
+}
+function closeModal() {
+    document.getElementById('supplierModal').classList.remove('active');
+}
+document.getElementById('supplierModal').addEventListener('click', function(e) {
+    if (e.target === this) closeModal();
+});
+</script>
+{% endblock %}
+"""
+
+# ──────────────────────────────────────────────────────────────────────
+# TEMPLATE: purchase_orders.html
+# ──────────────────────────────────────────────────────────────────────
+TEMPLATES["purchase_orders.html"] = """
+{% extends "base.html" %}
+{% block content %}
+<style>
+    :root { --brand:#705194; --brand-light:#f3eeff; --green:#10b981; --red:#ef4444; --orange:#f59e0b; --blue:#3b82f6; --radius:16px; --shadow:0 2px 10px rgba(112,81,148,.05); }
+    .po-wrapper { max-width:960px; margin:0 auto; padding:10px; }
+    .page-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:12px; }
+    .page-header h2 { margin:0; font-size:1.2rem; font-weight:800; color:#1e293b; }
+    .btn-add { background:var(--brand); color:white; border:none; padding:10px 20px; border-radius:10px; font-weight:700; cursor:pointer; font-size:0.8rem; display:flex; align-items:center; gap:6px; text-decoration:none; }
+
+    .po-list { display:flex; flex-direction:column; gap:10px; }
+    .po-card { background:white; border:1.5px solid #e8e4f0; border-radius:var(--radius); padding:16px 20px; box-shadow:var(--shadow); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; transition:.2s; }
+    .po-card:hover { border-color:var(--brand); }
+    .po-info h4 { margin:0 0 4px; font-size:0.9rem; }
+    .po-info .meta { font-size:0.72rem; color:#64748b; display:flex; gap:12px; flex-wrap:wrap; }
+    .po-info .meta span { display:flex; align-items:center; gap:4px; }
+
+    .status-badge { padding:4px 12px; border-radius:99px; font-size:0.65rem; font-weight:800; text-transform:uppercase; letter-spacing:0.5px; }
+    .status-draft { background:#f1f5f9; color:#475569; }
+    .status-sent { background:#eff6ff; color:#2563eb; }
+    .status-received { background:#ecfdf5; color:#059669; }
+    .status-cancelled { background:#fef2f2; color:#dc2626; }
+
+    .po-actions { display:flex; gap:6px; }
+    .btn-sm { border:none; padding:6px 12px; border-radius:6px; font-size:0.7rem; font-weight:700; cursor:pointer; display:flex; align-items:center; gap:4px; text-decoration:none; }
+    .btn-view { background:var(--brand-light); color:var(--brand); }
+    .btn-edit-sm { background:#f1f5f9; color:#475569; }
+    .btn-delete-sm { background:#fef2f2; color:#ef4444; }
+    .empty-state { text-align:center; padding:60px 20px; color:#94a3b8; }
+    .empty-state i { font-size:3rem; margin-bottom:12px; opacity:0.3; }
+</style>
+
+<div class="po-wrapper">
+    <div class="page-header">
+        <h2><i class="fas fa-file-invoice" style="color:var(--brand);margin-right:8px;"></i>Purchase Orders</h2>
+        <a href="/purchase_order/new" class="btn-add"><i class="fas fa-plus"></i> New Purchase Order</a>
+    </div>
+
+    {% if orders %}
+    <div class="po-list">
+        {% for o in orders %}
+        <div class="po-card">
+            <div class="po-info">
+                <h4>{{ o.order_number }}
+                    <span class="status-badge status-{{ o.status }}">{{ o.status|upper }}</span>
+                </h4>
+                <div class="meta">
+                    <span><i class="fas fa-truck" style="color:var(--brand);"></i> {{ o.supplier.name if o.supplier else 'No Supplier' }}</span>
+                    <span><i class="fas fa-box" style="color:var(--orange);"></i> {{ o.items|length }} item(s)</span>
+                    <span><i class="fas fa-calendar" style="color:var(--blue);"></i> {{ o.date_created.strftime('%b %d, %Y') }}</span>
+                    <span style="font-weight:700;color:var(--green);">₱{{ "{:,.2f}".format(order_totals.get(o.id, 0)) }}</span>
+                </div>
+            </div>
+            <div class="po-actions">
+                <a href="/purchase_order/{{ o.id }}" class="btn-sm btn-view"><i class="fas fa-eye"></i> View</a>
+                {% if o.status == 'draft' %}
+                <a href="/purchase_order/{{ o.id }}/edit" class="btn-sm btn-edit-sm"><i class="fas fa-pen"></i> Edit</a>
+                {% endif %}
+                {% if o.status == 'draft' %}
+                <form method="POST" action="/purchase_order/{{ o.id }}/delete" onsubmit="return confirm('Delete {{ o.order_number }}?')" style="display:inline;">
+                    <button class="btn-sm btn-delete-sm" type="submit"><i class="fas fa-trash"></i></button>
+                </form>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <i class="fas fa-file-invoice"></i>
+        <p>No purchase orders yet. Create your first one to start tracking purchases.</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+"""
+
+# ──────────────────────────────────────────────────────────────────────
+# TEMPLATE: purchase_order_form.html (create / edit)
+# ──────────────────────────────────────────────────────────────────────
+TEMPLATES["purchase_order_form.html"] = """
+{% extends "base.html" %}
+{% block content %}
+<style>
+    :root { --brand:#705194; --brand-light:#f3eeff; --green:#10b981; --red:#ef4444; --orange:#f59e0b; --blue:#3b82f6; --radius:16px; --shadow:0 2px 10px rgba(112,81,148,.05); }
+    .pof-wrapper { max-width:900px; margin:0 auto; padding:10px; }
+    .page-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:12px; }
+    .page-header h2 { margin:0; font-size:1.15rem; font-weight:800; color:#1e293b; }
+    .btn-back { background:#f1f5f9; color:#475569; border:none; padding:8px 16px; border-radius:8px; font-weight:700; cursor:pointer; font-size:0.8rem; text-decoration:none; display:flex; align-items:center; gap:6px; }
+
+    .form-card { background:white; border:1.5px solid #e8e4f0; border-radius:var(--radius); padding:20px; box-shadow:var(--shadow); margin-bottom:16px; }
+    .form-card h3 { margin:0 0 14px; font-size:0.85rem; font-weight:800; text-transform:uppercase; color:#475569; letter-spacing:0.5px; border-bottom:1px solid #e8e4f0; padding-bottom:10px; }
+    .form-row { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
+    .form-group { flex:1; min-width:200px; margin-bottom:0; }
+    .form-group label { display:block; font-size:0.7rem; font-weight:700; color:#475569; text-transform:uppercase; margin-bottom:4px; }
+    .form-group select, .form-group input, .form-group textarea { width:100%; padding:10px; border:1.5px solid #e8e4f0; border-radius:8px; font-size:0.82rem; box-sizing:border-box; }
+    .form-group select:focus, .form-group input:focus, .form-group textarea:focus { outline:none; border-color:var(--brand); }
+
+    /* Item table */
+    .item-table { width:100%; border-collapse:collapse; margin-top:8px; }
+    .item-table th { background:#f1f5f9; text-align:left; padding:10px; font-size:0.68rem; color:#475569; border:1px solid #e8e4f0; text-transform:uppercase; }
+    .item-table td { padding:8px 10px; font-size:0.8rem; border:1px solid #e8e4f0; vertical-align:middle; }
+    .item-table td input { width:100%; padding:6px 8px; border:1px solid #e8e4f0; border-radius:6px; font-size:0.8rem; box-sizing:border-box; }
+    .item-table td input:focus { outline:none; border-color:var(--brand); }
+    .item-table td input[type=number] { text-align:center; }
+    .btn-remove-row { background:#fef2f2; color:#ef4444; border:none; width:28px; height:28px; border-radius:6px; cursor:pointer; font-size:0.8rem; display:flex; align-items:center; justify-content:center; }
+
+    .add-item-bar { display:flex; gap:8px; margin-top:12px; align-items:center; flex-wrap:wrap; }
+    .add-item-bar select, .add-item-bar input { padding:8px; border:1.5px solid #e8e4f0; border-radius:8px; font-size:0.8rem; }
+    .btn-add-item { background:var(--brand-light); color:var(--brand); border:none; padding:8px 16px; border-radius:8px; font-weight:700; cursor:pointer; font-size:0.78rem; display:flex; align-items:center; gap:4px; }
+
+    .total-bar { background:var(--brand-light); border:1.5px solid #e8e4f0; border-radius:var(--radius); padding:14px 20px; display:flex; justify-content:flex-end; align-items:center; gap:24px; margin-top:16px; }
+    .total-bar label { font-size:0.7rem; font-weight:800; text-transform:uppercase; color:#64748b; }
+    .total-bar .total-value { font-size:1.3rem; font-weight:900; color:var(--brand); }
+
+    .form-actions { display:flex; gap:8px; justify-content:flex-end; margin-top:16px; }
+    .btn-draft { background:#f1f5f9; color:#475569; border:none; padding:12px 24px; border-radius:10px; font-weight:700; cursor:pointer; font-size:0.85rem; }
+    .btn-submit { background:var(--brand); color:white; border:none; padding:12px 24px; border-radius:10px; font-weight:700; cursor:pointer; font-size:0.85rem; display:flex; align-items:center; gap:6px; }
+</style>
+
+<div class="pof-wrapper">
+    <div class="page-header">
+        <h2>{% if order %}Edit {{ order.order_number }}{% else %}New Purchase Order{% endif %}</h2>
+        <a href="/purchase_orders" class="btn-back"><i class="fas fa-arrow-left"></i> Back to Orders</a>
+    </div>
+
+    <form id="poForm" method="POST" action="{% if order %}/purchase_order/{{ order.id }}/update{% else %}/purchase_order/create{% endif %}">
+        <!-- Order Details -->
+        <div class="form-card">
+            <h3><i class="fas fa-info-circle" style="color:var(--brand);margin-right:6px;"></i>Order Details</h3>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Supplier / Destination *</label>
+                    <select name="supplier_id" id="supplierSelect">
+                        <option value="">-- Select Supplier --</option>
+                        {% for s in suppliers %}
+                        <option value="{{ s.id }}" {% if order and order.supplier_id == s.id %}selected{% endif %}>{{ s.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Notes</label>
+                    <textarea name="notes" rows="2" placeholder="Optional notes for this order...">{{ order.notes if order else '' }}</textarea>
+                </div>
+            </div>
+        </div>
+
+        <!-- Items -->
+        <div class="form-card">
+            <h3><i class="fas fa-boxes-stacked" style="color:var(--orange);margin-right:6px;"></i>Order Items</h3>
+
+            <!-- Quick add from product catalog -->
+            <div class="add-item-bar">
+                <select id="productSelect" style="min-width:220px;">
+                    <option value="">-- Add from catalog --</option>
+                    {% for p in products %}
+                    <option value="{{ p.id }}" data-name="{{ p.name }}" data-flavor="{{ p.flavor or '' }}" data-category="{{ p.type or '' }}" data-cost="{{ p.cost or 0 }}">{{ p.name }} {% if p.flavor %}({{ p.flavor }}){% endif %}</option>
+                    {% endfor %}
+                </select>
+                <button type="button" class="btn-add-item" onclick="addFromCatalog()"><i class="fas fa-plus"></i> Add Product</button>
+                <button type="button" class="btn-add-item" onclick="addCustomRow()" style="background:#f1f5f9;color:#475569;"><i class="fas fa-pen"></i> Add Custom Item</button>
+            </div>
+
+            <div style="overflow-x:auto;margin-top:12px;">
+                <table class="item-table" id="itemsTable">
+                    <thead>
+                        <tr>
+                            <th style="width:30px;">#</th>
+                            <th>Product Name</th>
+                            <th>Flavor</th>
+                            <th>Category</th>
+                            <th style="width:90px;text-align:center;">Qty</th>
+                            <th style="width:110px;text-align:right;">Unit Cost</th>
+                            <th style="width:110px;text-align:right;">Line Total</th>
+                            <th style="width:40px;"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="itemsBody">
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="total-bar">
+                <label>Total Estimated Cost</label>
+                <div class="total-value" id="grandTotal">₱0.00</div>
+            </div>
+        </div>
+
+        <input type="hidden" name="items" id="itemsInput">
+
+        <div class="form-actions">
+            <button type="button" class="btn-draft" onclick="window.location='/purchase_orders'">Cancel</button>
+            <button type="submit" class="btn-submit" onclick="prepareSubmit()"><i class="fas fa-save"></i> {% if order %}Update Order{% else %}Save as Draft{% endif %}</button>
+        </div>
+    </form>
+</div>
+
+<script>
+let rowCounter = 0;
+const existingItems = {{ order_items | tojson }};
+
+// Load existing items on edit
+if (existingItems && existingItems.length > 0) {
+    existingItems.forEach(item => {
+        addRow(item.product_id, item.product_name, item.flavor, item.category, item.qty_ordered, item.unit_cost);
+    });
+}
+
+function addRow(productId, name, flavor, category, qty, cost) {
+    rowCounter++;
+    const tbody = document.getElementById('itemsBody');
+    const tr = document.createElement('tr');
+    tr.dataset.row = rowCounter;
+    tr.innerHTML = `
+        <td style="text-align:center;color:#94a3b8;font-size:0.7rem;">${rowCounter}</td>
+        <td><input type="text" name="product_name" value="${name || ''}" placeholder="Item name" required></td>
+        <td><input type="text" name="flavor" value="${flavor || ''}" placeholder="Flavor"></td>
+        <td><input type="text" name="category" value="${category || ''}" placeholder="Category"></td>
+        <td><input type="number" name="qty_ordered" value="${qty || 1}" min="1" onchange="recalcTotal()" onclick="this.select()" style="text-align:center;"></td>
+        <td><input type="number" name="unit_cost" value="${cost || 0}" min="0" step="0.01" onchange="recalcTotal()" onclick="this.select()" style="text-align:right;"></td>
+        <td style="text-align:right;font-weight:700;color:var(--brand);" class="line-total">₱${((qty || 1) * (cost || 0)).toFixed(2)}</td>
+        <td><button type="button" class="btn-remove-row" onclick="this.closest('tr').remove(); renumberRows(); recalcTotal();"><i class="fas fa-times"></i></button></td>
+    `;
+    tr.dataset.productId = productId || '';
+    tbody.appendChild(tr);
+    recalcTotal();
+}
+
+function addFromCatalog() {
+    const sel = document.getElementById('productSelect');
+    const opt = sel.options[sel.selectedIndex];
+    if (!opt.value) return;
+    addRow(
+        opt.value,
+        opt.dataset.name,
+        opt.dataset.flavor,
+        opt.dataset.category,
+        1,
+        parseFloat(opt.dataset.cost) || 0
+    );
+    sel.selectedIndex = 0;
+}
+
+function addCustomRow() {
+    addRow('', '', '', '', 1, 0);
+}
+
+function renumberRows() {
+    let i = 1;
+    document.querySelectorAll('#itemsBody tr').forEach(tr => {
+        tr.querySelector('td').textContent = i++;
+    });
+}
+
+function recalcTotal() {
+    let grand = 0;
+    document.querySelectorAll('#itemsBody tr').forEach(tr => {
+        const qty = parseFloat(tr.querySelector('input[name=qty_ordered]').value) || 0;
+        const cost = parseFloat(tr.querySelector('input[name=unit_cost]').value) || 0;
+        const lineTotal = qty * cost;
+        tr.querySelector('.line-total').textContent = '₱' + lineTotal.toFixed(2);
+        grand += lineTotal;
+    });
+    document.getElementById('grandTotal').textContent = '₱' + grand.toFixed(2);
+}
+
+function prepareSubmit() {
+    const items = [];
+    document.querySelectorAll('#itemsBody tr').forEach(tr => {
+        items.push({
+            product_id: tr.dataset.productId || null,
+            product_name: tr.querySelector('input[name=product_name]').value,
+            flavor: tr.querySelector('input[name=flavor]').value,
+            category: tr.querySelector('input[name=category]').value,
+            qty_ordered: parseInt(tr.querySelector('input[name=qty_ordered]').value) || 0,
+            unit_cost: parseFloat(tr.querySelector('input[name=unit_cost]').value) || 0,
+        });
+    });
+    document.getElementById('itemsInput').value = JSON.stringify(items);
+}
+</script>
+{% endblock %}
+"""
+
+# ──────────────────────────────────────────────────────────────────────
+# TEMPLATE: purchase_order_detail.html
+# ──────────────────────────────────────────────────────────────────────
+TEMPLATES["purchase_order_detail.html"] = """
+{% extends "base.html" %}
+{% block content %}
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+
+<style>
+    :root { --brand:#705194; --brand-light:#f3eeff; --green:#10b981; --red:#ef4444; --orange:#f59e0b; --blue:#3b82f6; --radius:16px; --shadow:0 2px 10px rgba(112,81,148,.05); --navy:#162135; }
+    .pod-wrapper { max-width:900px; margin:0 auto; padding:10px; }
+
+    .pod-controls { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:8px; }
+    .btn-back { background:#f1f5f9; color:#475569; border:none; padding:8px 16px; border-radius:8px; font-weight:700; cursor:pointer; font-size:0.8rem; text-decoration:none; display:flex; align-items:center; gap:6px; }
+    .btn-group { display:flex; gap:6px; flex-wrap:wrap; }
+    .btn-action { border:none; padding:8px 16px; border-radius:8px; font-weight:700; cursor:pointer; font-size:0.78rem; display:flex; align-items:center; gap:5px; color:white; }
+    .btn-send { background:var(--blue); }
+    .btn-receive { background:var(--green); }
+    .btn-cancel { background:var(--red); }
+    .btn-edit { background:var(--orange); }
+    .btn-print { background:#475569; }
+    .btn-img { background:var(--brand); }
+
+    .status-badge { padding:4px 14px; border-radius:99px; font-size:0.68rem; font-weight:800; text-transform:uppercase; letter-spacing:0.5px; }
+    .status-draft { background:#f1f5f9; color:#475569; }
+    .status-sent { background:#eff6ff; color:#2563eb; }
+    .status-received { background:#ecfdf5; color:#059669; }
+    .status-cancelled { background:#fef2f2; color:#dc2626; }
+
+    /* Document */
+    #capture-area { background:white; border:1.5px solid #e8e4f0; border-radius:var(--radius); padding:5vw; position:relative; }
+    .doc-header { text-align:center; border-bottom:2px solid var(--navy); padding-bottom:18px; margin-bottom:24px; }
+    .doc-header h2 { margin:0; font-size:clamp(1rem,4vw,1.4rem); font-weight:800; letter-spacing:1px; }
+    .doc-header .sub { font-size:0.75rem; color:#64748b; margin-top:4px; }
+    .doc-header .po-number { font-size:0.9rem; font-weight:700; color:var(--brand); margin-top:8px; }
+    .doc-header .po-date { font-size:0.72rem; color:#94a3b8; margin-top:2px; }
+
+    .supplier-box { background:var(--brand-light); border:1px solid #e8e4f0; border-radius:10px; padding:14px 18px; margin-bottom:20px; }
+    .supplier-box h4 { margin:0 0 4px; font-size:0.8rem; font-weight:800; text-transform:uppercase; color:#475569; }
+    .supplier-box .detail { font-size:0.78rem; color:#1e293b; margin:2px 0; }
+
+    .item-table { width:100%; border-collapse:collapse; margin-bottom:16px; }
+    .item-table th { background:#f1f5f9; text-align:left; padding:10px; font-size:0.68rem; color:#475569; border:1px solid #e8e4f0; text-transform:uppercase; }
+    .item-table td { padding:10px; font-size:0.8rem; border:1px solid #e8e4f0; vertical-align:middle; }
+    .item-table tbody tr:nth-child(even) { background:#fafafa; }
+
+    .total-row { background:var(--brand-light) !important; font-weight:800; }
+    .total-row td { font-size:0.85rem !important; }
+
+    .notes-box { background:#fafafa; border:1px solid #e8e4f0; border-radius:8px; padding:12px; margin-top:12px; font-size:0.78rem; color:#475569; }
+    .notes-box strong { display:block; margin-bottom:4px; font-size:0.68rem; text-transform:uppercase; color:#94a3b8; }
+
+    .doc-footer { margin-top:24px; padding-top:12px; border-top:1px solid #e8e4f0; font-size:0.65rem; color:#94a3b8; text-align:center; }
+
+    /* Editable qty */
+    .editable-qty { display:inline-flex; align-items:center; gap:4px; }
+    .editable-qty input { width:60px; padding:4px 6px; border:1px solid #e8e4f0; border-radius:6px; text-align:center; font-size:0.8rem; font-weight:700; }
+    .editable-qty input:focus { outline:none; border-color:var(--brand); }
+    .qty-display { font-weight:700; color:var(--green); }
+    .btn-qty-save { background:var(--green); color:white; border:none; padding:3px 8px; border-radius:4px; cursor:pointer; font-size:0.65rem; font-weight:700; }
+
+    @media print {
+        body * { visibility:hidden !important; }
+        #capture-area, #capture-area * { visibility:visible !important; }
+        #capture-area { position:fixed; top:0; left:0; width:100vw; padding:28px 32px; border:none; box-shadow:none; background:white; }
+        .pod-controls { display:none !important; }
+        .btn-qty-save { display:none !important; }
+        .editable-qty input { border:none; background:transparent; }
+    }
+</style>
+
+<div class="pod-wrapper">
+    <div class="pod-controls no-print">
+        <a href="/purchase_orders" class="btn-back"><i class="fas fa-arrow-left"></i> All Orders</a>
+        <div class="btn-group">
+            {% if order.status == 'draft' %}
+            <a href="/purchase_order/{{ order.id }}/edit" class="btn-action btn-edit"><i class="fas fa-pen"></i> Edit</a>
+            <form method="POST" action="/purchase_order/{{ order.id }}/status" style="display:inline;">
+                <input type="hidden" name="status" value="sent">
+                <button type="submit" class="btn-action btn-send"><i class="fas fa-paper-plane"></i> Send to Supplier</button>
+            </form>
+            <form method="POST" action="/purchase_order/{{ order.id }}/delete" onsubmit="return confirm('Cancel this order?')" style="display:inline;">
+                <button type="submit" class="btn-action btn-cancel"><i class="fas fa-times"></i> Cancel</button>
+            </form>
+            {% elif order.status == 'sent' %}
+            <form method="POST" action="/purchase_order/{{ order.id }}/status" style="display:inline;">
+                <input type="hidden" name="status" value="received">
+                <button type="submit" class="btn-action btn-receive"><i class="fas fa-check"></i> Mark Received</button>
+            </form>
+            <form method="POST" action="/purchase_order/{{ order.id }}/status" style="display:inline;">
+                <input type="hidden" name="status" value="cancelled">
+                <button type="submit" class="btn-action btn-cancel"><i class="fas fa-times"></i> Cancel</button>
+            </form>
+            {% endif %}
+            <button onclick="window.print()" class="btn-action btn-print"><i class="fas fa-print"></i> Print</button>
+            <button onclick="downloadPO()" class="btn-action btn-img"><i class="fas fa-image"></i> Image</button>
+        </div>
+    </div>
+
+    <div id="capture-area">
+        <div class="doc-header">
+            <h2>F.L.E.X VAPE SHOP</h2>
+            <div class="sub">Inventory Management System</div>
+            <div class="po-number">{{ order.order_number }}
+                <span class="status-badge status-{{ order.status }}">{{ order.status|upper }}</span>
+            </div>
+            <div class="po-date">Created: {{ order.date_created.strftime('%B %d, %Y %I:%M %p') }}</div>
+            {% if order.date_updated and order.date_updated != order.date_created %}
+            <div class="po-date">Updated: {{ order.date_updated.strftime('%B %d, %Y %I:%M %p') }}</div>
+            {% endif %}
+        </div>
+
+        <!-- Supplier / Destination -->
+        <div class="supplier-box">
+            <h4><i class="fas fa-truck" style="margin-right:4px;"></i> Supplier / Destination</h4>
+            {% if order.supplier %}
+            <div class="detail"><strong>{{ order.supplier.name }}</strong></div>
+            {% if order.supplier.contact %}<div class="detail">{{ order.supplier.contact }}</div>{% endif %}
+            {% if order.supplier.phone %}<div class="detail"><i class="fas fa-phone" style="margin-right:4px;"></i>{{ order.supplier.phone }}</div>{% endif %}
+            {% if order.supplier.email %}<div class="detail"><i class="fas fa-envelope" style="margin-right:4px;"></i>{{ order.supplier.email }}</div>{% endif %}
+            {% if order.supplier.address %}<div class="detail"><i class="fas fa-map-marker-alt" style="margin-right:4px;"></i>{{ order.supplier.address }}</div>{% endif %}
+            {% else %}
+            <div class="detail" style="color:#94a3b8;">No supplier assigned</div>
+            {% endif %}
+        </div>
+
+        <!-- Items -->
+        <table class="item-table">
+            <thead>
+                <tr>
+                    <th style="width:30px;">#</th>
+                    <th>Product Name</th>
+                    <th>Flavor</th>
+                    <th>Category</th>
+                    <th style="text-align:center;">Quantity</th>
+                    <th style="text-align:right;">Unit Cost</th>
+                    <th style="text-align:right;">Line Total</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% set total_cost = namespace(val=0.0) %}
+                {% set total_qty = namespace(val=0) %}
+                {% for item in order.items %}
+                <tr>
+                    <td style="text-align:center;color:#94a3b8;">{{ loop.index }}</td>
+                    <td><strong>{{ item.product_name }}</strong></td>
+                    <td style="color:#64748b;">{{ item.flavor or '—' }}</td>
+                    <td style="color:#64748b;text-transform:capitalize;">{{ item.category or '—' }}</td>
+                    <td style="text-align:center;">
+                        {% if order.status == 'draft' %}
+                        <div class="editable-qty">
+                            <input type="number" value="{{ item.qty_ordered }}" min="1" data-item-id="{{ item.id }}" onchange="updateQty({{ item.id }}, this.value)">
+                            <button class="btn-qty-save" onclick="saveQty({{ item.id }})">Save</button>
+                        </div>
+                        {% else %}
+                        <span class="qty-display">{{ item.qty_ordered }}</span>
+                        {% endif %}
+                    </td>
+                    <td style="text-align:right;">₱{{ "{:,.2f}".format(item.unit_cost) }}</td>
+                    <td style="text-align:right;font-weight:700;color:var(--brand);">₱{{ "{:,.2f}".format(item.qty_ordered * item.unit_cost) }}</td>
+                </tr>
+                {% set _ = total_cost.__setattr__('val', total_cost.val + (item.qty_ordered * item.unit_cost)) %}
+                {% set _ = total_qty.__setattr__('val', total_qty.val + item.qty_ordered) %}
+                {% endfor %}
+                <tr class="total-row">
+                    <td colspan="4" style="text-align:right;">TOTAL</td>
+                    <td style="text-align:center;">{{ total_qty.val }}</td>
+                    <td></td>
+                    <td style="text-align:right;">₱{{ "{:,.2f}".format(total_cost.val) }}</td>
+                </tr>
+            </tbody>
+        </table>
+
+        {% if order.notes %}
+        <div class="notes-box">
+            <strong>Notes</strong>
+            {{ order.notes }}
+        </div>
+        {% endif %}
+
+        <div class="doc-footer">
+            <span>F.L.E.X System &bull; Purchase Order &bull; {{ order.order_number }}</span>
+        </div>
+    </div>
+</div>
+
+<script>
+function updateQty(itemId, newQty) {
+    // Store pending qty change
+    window['_pending_qty_' + itemId] = parseInt(newQty) || 0;
+}
+function saveQty(itemId) {
+    const newQty = window['_pending_qty_' + itemId];
+    if (newQty === undefined) return;
+    fetch('/api/purchase_order_item/' + itemId + '/qty', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({qty_ordered: newQty})
+    }).then(r => r.json()).then(data => {
+        if (data.success) location.reload();
+        else alert('Failed to update quantity.');
+    });
+}
+async function downloadPO() {
+    const el = document.getElementById('capture-area');
+    try {
+        const canvas = await html2canvas(el, { scale:3, useCORS:true, backgroundColor:'#ffffff' });
+        const link = document.createElement('a');
+        link.href = canvas.toDataURL('image/png', 1.0);
+        link.download = 'FLEX_PO_{{ order.order_number }}.png';
+        link.click();
+    } catch(e) { alert('Export failed.'); }
+}
 </script>
 {% endblock %}
 """
