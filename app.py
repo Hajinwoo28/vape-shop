@@ -4,7 +4,7 @@ import time
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from jinja2 import DictLoader
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session, send_from_directory
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import func, extract, desc
 from flask_migrate import Migrate
@@ -105,11 +105,6 @@ def get_products_dict():
     } for p in products}
 
 # --- 5. ROUTES ---
-
-@app.route('/uploads/<path:filename>')
-def uploaded_file(filename):
-    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
-
 
 @app.route('/')
 def dashboard():
@@ -726,11 +721,11 @@ TEMPLATES["base.html"] = """
     <link rel="icon" type="image/jpeg" href="/static/images/flex_vape_shop.jpg">
     
     <!-- Professional Font & Icons -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     
     <!-- Barcode Scanner Library -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 
     <style>
         :root {
@@ -1966,8 +1961,7 @@ TEMPLATES["inventory.html"] = """
                     <tr>
                         <td>
                             <div class="img-cell">
-                                {% set real_img = p.image and p.image != 'default.jpg' %}
-                                <img src="{{ '/uploads/' + p.image if real_img else '' }}" {% if not real_img %}style="display:none;width:100%;height:100%;object-fit:cover;"{% else %}style="width:100%;height:100%;object-fit:cover;"{% endif %} onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div style="{{ 'display:none;' if real_img else 'display:flex;' }}width:100%;height:100%;align-items:center;justify-content:center;color:#cbd5e1;font-size:1.2rem;"><i class="fas fa-image"></i></div>
+                                <img src="{{ url_for('static', filename='uploads/' + p.image) if p.image else '' }}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" style="width:100%;height:100%;object-fit:cover;"><div style="display:none;width:100%;height:100%;align-items:center;justify-content:center;color:#cbd5e1;font-size:1.2rem;"><i class="fas fa-image"></i></div>
                             </div>
                         </td>
                         <td>
@@ -2191,8 +2185,37 @@ TEMPLATES["inventory.html"] = """
     }
 
     function confirmInvPrint() {
+        const content = document.getElementById('invPreviewContent').innerHTML;
+        const printWin = window.open('', '_blank', 'width=1000,height=750');
+        printWin.document.write(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>F.L.E.X Inventory Report</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body {
+      font-family: 'Inter', 'Outfit', sans-serif;
+      color: #162135;
+      background: white;
+      padding: 18mm 14mm 16mm;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    @page { size: A4 landscape; margin: 18mm 14mm 16mm; }
+    @media print { body { padding: 0; } }
+  </style>
+</head>
+<body>${content}</body>
+</html>`);
+        printWin.document.close();
+        printWin.focus();
+        setTimeout(() => {
+            printWin.print();
+            printWin.close();
+        }, 600);
         closeInvPreview();
-        setTimeout(() => window.print(), 80);
     }
 
     function _statChip(label, value, colorClass) {
@@ -2222,7 +2245,11 @@ TEMPLATES["login.html"] = """
     <title>Flex Vape | Login</title>
     <link rel="icon" type="image/jpeg" href="/static/images/flex_vape_shop.jpg">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
+    <style>
+        :root {
+            --brand-navy: #0f172a;
+            --brand-purple: #705194;
             --error-red: #ef4444;
             --bg-soft: #f8fafc;
         }
@@ -2371,7 +2398,7 @@ TEMPLATES["products.html"] = """
 
 {% block content %}
 <!-- Include Barcode Generation Library -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.5/JsBarcode.all.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
 
 <style>
     *, *::before, *::after { box-sizing: border-box; }
@@ -2599,17 +2626,6 @@ function editProduct(key) {
     document.getElementById('price').value = p.price;
     document.getElementById('discount').value = p.discount || 0;
     document.getElementById('qty_group').style.display = 'none';
-    // Show existing image if available
-    const imgPreview = document.getElementById('imgPreview');
-    const uploadHint = document.getElementById('uploadHint');
-    if (p.image && p.image !== 'default.jpg') {
-        imgPreview.src = '/uploads/' + p.image;
-        imgPreview.style.display = 'block';
-        uploadHint.style.display = 'none';
-    } else {
-        imgPreview.style.display = 'none';
-        uploadHint.style.display = 'flex';
-    }
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -2961,7 +2977,7 @@ TEMPLATES["reports.html"] = """
 {% extends "base.html" %}
 
 {% block content %}
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
 <style>
     :root {
@@ -4538,7 +4554,7 @@ TEMPLATES["analytics.html"] = """
     </div>
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
 const trendLabels   = {{ trend_labels|tojson }};
 const trendRevenue  = {{ trend_revenue|tojson }};
@@ -5135,7 +5151,7 @@ TEMPLATES["purchase_report.html"] = """
 {% extends "base.html" %}
 
 {% block content %}
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
 <style>
     :root {
